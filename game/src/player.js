@@ -1,174 +1,212 @@
-// player.js — Jace Marlowe on foot: third-person movement, a simple
-// low-poly character with a walk cycle, jumping, and the camera rig that
-// follows him (and the car) with mouse orbit.
+// Vellora Bay — the on-foot player. A low-poly humanoid with a walk cycle and
+// a jump, driven camera-relative with WASD. The same builder makes pedestrians
+// and thugs with different palettes, so the whole crowd shares one rig.
+import { clamp, damp, angleDamp, dist2 } from './util.js';
+import { resolveCollision } from './city.js';
 
-import * as THREE from '../vendor/three.module.min.js';
-import { clamp, resolveCircleBox, wrapAngle } from './util.js';
-
-// Build the on-foot character: jacket torso, head, cap, arms and legs
-// that swing while he walks. Cheap boxes, but he reads as a person.
-export function makePlayerMesh() {
+// Build a simple articulated person. Returns the group plus named limbs so
+// walk cycles can swing them, and a torso mesh for outfit colour changes.
+export function makeHumanoid(THREE, opts) {
+  const o = Object.assign({ skin: '#c98d64', shirt: '#3d6fb5', pants: '#2c3240', hair: '#241a12', scale: 1 }, opts || {});
+  const mat = (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.02 });
   const g = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({ color: 0xc89a72 });
-  const jacket = new THREE.MeshLambertMaterial({ color: 0x2a6a8a });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2a33 });
-  const cap = new THREE.MeshLambertMaterial({ color: 0xc83228 });
-
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.36), jacket);
-  torso.position.y = 1.12;
-  torso.name = 'torso';
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.34), mat(o.shirt));
+  torso.position.y = 1.18;
+  torso.castShadow = true;
   g.add(torso);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.4), skin);
-  head.position.y = 1.72;
-  head.name = 'head';
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.38), mat(o.skin));
+  head.position.y = 1.78;
+  head.castShadow = true;
   g.add(head);
-  const hat = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.12, 0.46), cap);
-  hat.position.y = 1.95;
-  hat.name = 'hat';
-  g.add(hat);
-  const brim = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.06, 0.22), cap);
-  brim.position.set(0, 1.9, 0.3);
-  g.add(brim);
-
-  const armGeo = new THREE.BoxGeometry(0.16, 0.62, 0.16);
-  const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.2);
-  const mkLimb = (geo, mat, x, y, name) => {
+  const hair = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.16, 0.42), mat(o.hair));
+  hair.position.y = 2.0;
+  g.add(hair);
+  const mkLimb = (w, h, d, material, x, y) => {
     const pivot = new THREE.Group();
     pivot.position.set(x, y, 0);
-    const m = new THREE.Mesh(geo, mat);
-    m.position.y = -0.31;
-    pivot.add(m);
-    pivot.name = name;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.position.y = -h / 2;
+    mesh.castShadow = true;
+    pivot.add(mesh);
     g.add(pivot);
     return pivot;
   };
-  const armL = mkLimb(armGeo, jacket, -0.4, 1.42, 'armL');
-  const armR = mkLimb(armGeo, jacket, 0.4, 1.42, 'armR');
-  const legL = mkLimb(legGeo, pants, -0.16, 0.76, 'legL');
-  const legR = mkLimb(legGeo, pants, 0.16, 0.76, 'legR');
-  g.userData.limbs = { armL, armR, legL, legR, torso };
-  return g;
+  const armL = mkLimb(0.2, 0.62, 0.2, mat(o.skin), -0.42, 1.48);
+  const armR = mkLimb(0.2, 0.62, 0.2, mat(o.skin), 0.42, 1.48);
+  const legL = mkLimb(0.26, 0.72, 0.26, mat(o.pants), -0.17, 0.82);
+  const legR = mkLimb(0.26, 0.72, 0.26, mat(o.pants), 0.17, 0.82);
+  g.scale.setScalar(o.scale);
+  return { group: g, torso, head, armL, armR, legL, legR };
 }
 
-export function createPlayer(scene, x, z) {
-  const mesh = makePlayerMesh();
-  mesh.position.set(x, 0, z);
-  scene.add(mesh);
-  return {
-    mesh,
-    x, z,
-    y: 0, vy: 0,
-    angle: 0,           // facing
-    camAngle: 0,        // camera orbit around the player
-    camPitch: 0.38,
-    camDist: 9.5,
-    speed: 0,
-    moving: false,
-    walkPhase: 0,
-    health: 100,
-    onFoot: true,
-    car: null,          // car record when driving
-    punchCooldown: 0,
-    shootCooldown: 0,
-    ammo: 12,
-    invuln: 0,
-  };
-}
-
-// Move the player on foot for one frame. Returns true while moving.
-export function walkPlayer(p, input, dt, colliders) {
-  const run = input.run;
-  const maxSpeed = run ? 8.5 : 4.6;
-  // Movement is relative to the camera, not the world.
-  const fwdX = Math.sin(p.camAngle);
-  const fwdZ = Math.cos(p.camAngle);
-  const rightX = Math.cos(p.camAngle);
-  const rightZ = -Math.sin(p.camAngle);
-  let mx = 0;
-  let mz = 0;
-  if (input.forward) { mx += fwdX; mz += fwdZ; }
-  if (input.back) { mx -= fwdX; mz -= fwdZ; }
-  if (input.left) { mx -= rightX; mz -= rightZ; }
-  if (input.right) { mx += rightX; mz += rightZ; }
-  const len = Math.sqrt(mx * mx + mz * mz);
-  p.moving = len > 0.01;
-  if (p.moving) {
-    mx /= len; mz /= len;
-    const targetAngle = Math.atan2(mx, mz);
-    let d = wrapAngle(targetAngle - p.angle);
-    p.angle += clamp(d, -6 * dt, 6 * dt);
-    p.speed = maxSpeed;
-    p.x += mx * maxSpeed * dt;
-    p.z += mz * maxSpeed * dt;
-    p.walkPhase += dt * (run ? 11 : 7.5);
-  } else {
-    p.speed = 0;
-    p.walkPhase += dt * 2;
+export class Player {
+  constructor(S) {
+    this.S = S;
+    this.x = 6;
+    this.z = 14;
+    this.y = 0; // height above ground while jumping
+    this.vy = 0;
+    this.heading = Math.PI;
+    this.speed = 0;
+    this.walkPhase = 0;
+    this.onFoot = true;
+    this.car = null;
+    this.health = 100;
+    this.lastHurtAt = -99;
+    this.hurtFlash = 0;
+    this.rig = makeHumanoid(S.THREE, { shirt: '#c94f2e', pants: '#232a3a', hair: '#14100c' });
+    this.mesh = this.rig.group;
+    S.scene.add(this.mesh);
+    this.syncMesh();
   }
-  // Gravity and jumping.
-  if (input.jump && p.y <= 0.01) p.vy = 7.5;
-  p.vy -= 22 * dt;
-  p.y += p.vy * dt;
-  if (p.y < 0) { p.y = 0; p.vy = 0; }
-  // Building collision as a circle push-out.
-  for (const box of colliders) {
-    const out = resolveCircleBox(p.x, p.z, 0.55, box);
-    if (out) { p.x = out.x; p.z = out.z; }
+
+  reset(x, z, heading) {
+    this.x = x;
+    this.z = z;
+    this.y = 0;
+    this.vy = 0;
+    this.heading = heading === undefined ? Math.PI : heading;
+    this.speed = 0;
+    this.onFoot = true;
+    this.car = null;
+    this.mesh.visible = true;
+    this.syncMesh();
   }
-  p.x = clamp(p.x, -290, 290);
-  p.z = clamp(p.z, -290, 330);
-  p.mesh.position.set(p.x, p.y, p.z);
-  p.mesh.rotation.y = p.angle;
-  // Walk-cycle swing; idle breathing when still.
-  const limbs = p.mesh.userData.limbs;
-  const swing = p.moving ? Math.sin(p.walkPhase) * 0.65 : Math.sin(p.walkPhase) * 0.05;
-  limbs.armL.rotation.x = swing;
-  limbs.armR.rotation.x = -swing;
-  limbs.legL.rotation.x = -swing;
-  limbs.legR.rotation.x = swing;
-  limbs.torso.position.y = 1.12 + (p.moving ? Math.abs(Math.cos(p.walkPhase)) * 0.05 : 0);
-  return p.moving;
-}
 
-// Third-person camera: sits behind and above the focus point, orbits with
-// the mouse, and eases toward its target so turns feel weighted, not snappy.
-export function updateCamera(p, camera, dt, focusOverride) {
-  const focus = focusOverride || { x: p.x, z: p.z, y: p.y + 1.6 };
-  const driving = !!p.car;
-  const dist = driving ? 11.5 : p.camDist;
-  const pitch = driving ? 0.34 : p.camPitch;
-  const tx = focus.x - Math.sin(p.camAngle) * Math.cos(pitch) * dist;
-  const tz = focus.z - Math.cos(p.camAngle) * Math.cos(pitch) * dist;
-  const ty = focus.y + Math.sin(pitch) * dist;
-  const k = 1 - Math.exp(-9 * dt);
-  camera.position.x += (tx - camera.position.x) * k;
-  camera.position.y += (ty - camera.position.y) * k;
-  camera.position.z += (tz - camera.position.z) * k;
-  camera.lookAt(focus.x, focus.y + 0.4, focus.z);
-}
+  syncMesh() {
+    this.mesh.position.set(this.x, this.y, this.z);
+    this.mesh.rotation.y = this.heading;
+  }
 
-// When the player starts driving, swing the camera behind the car.
-// camAngle points from the camera toward the focus, so matching the car's
-// heading puts the camera on its tail.
-export function snapCameraBehindCar(p, camera) {
-  p.camAngle = p.car.angle;
-  const focus = { x: p.car.x, z: p.car.z, y: 1.6 };
-  camera.position.set(
-    focus.x - Math.sin(p.camAngle) * 11,
-    focus.y + 4,
-    focus.z - Math.cos(p.camAngle) * 11
-  );
-  camera.lookAt(focus.x, focus.y, focus.z);
-}
+  get pos() {
+    return { x: this.x, z: this.z };
+  }
 
-// Hurt the player; returns true when the hit kills him.
-export function hurtPlayer(p, amount) {
-  if (p.invuln > 0) return false;
-  p.health -= amount;
-  p.invuln = 0.6;
-  if (p.health <= 0) {
-    p.health = 0;
+  hurt(amount, fromX, fromZ) {
+    if (this.S.time - this.lastHurtAt < 0.25) return;
+    this.lastHurtAt = this.S.time;
+    this.health = Math.max(0, this.health - amount);
+    this.hurtFlash = 1;
+    if (fromX !== undefined) {
+      // Small knockback away from the hit.
+      const d = Math.max(0.001, dist2(this.x, this.z, fromX, fromZ));
+      this.x += ((this.x - fromX) / d) * 0.6;
+      this.z += ((this.z - fromZ) / d) * 0.6;
+    }
+    if (this.S.audio) this.S.audio.punch();
+    if (this.health <= 0) this.S.police.wasted();
+  }
+
+  heal(amount) {
+    this.health = Math.min(100, this.health + amount);
+  }
+
+  nearestCar(maxDist) {
+    let best = null;
+    let bestD = maxDist;
+    for (const car of this.S.traffic.allCars()) {
+      if (car.driver) continue;
+      const d = dist2(this.x, this.z, car.x, car.z);
+      if (d < bestD) {
+        bestD = d;
+        best = car;
+      }
+    }
+    return best;
+  }
+
+  tryEnterCar() {
+    const car = this.nearestCar(4.2);
+    if (!car) return false;
+    car.driver = 'player';
+    car.parked = false;
+    this.car = car;
+    this.onFoot = false;
+    this.mesh.visible = false;
+    this.S.audio.click();
+    this.S.hud.toast('You took the ' + car.label + ' — that is grand theft, friend.');
+    this.S.police.addHeat(1, 'stole a car');
+    this.S.missions.onCarStolen(car);
     return true;
   }
-  return false;
+
+  exitCar() {
+    if (!this.car) return;
+    const car = this.car;
+    car.driver = null;
+    car.parked = true;
+    car.speed = 0;
+    const side = 2.4;
+    this.x = car.x + Math.cos(car.heading + Math.PI / 2) * side;
+    this.z = car.z + Math.sin(car.heading + Math.PI / 2) * side;
+    this.heading = car.heading;
+    this.car = null;
+    this.onFoot = true;
+    this.mesh.visible = true;
+    this.syncMesh();
+    this.S.audio.click();
+  }
+
+  update(dt) {
+    const S = this.S;
+    this.hurtFlash = Math.max(0, this.hurtFlash - dt * 2.4);
+    if (!S.started || S.paused || S.over) return;
+    // Slow regen once the heat is off and nobody has hit us lately.
+    if (S.police.wanted === 0 && S.time - this.lastHurtAt > 6) this.heal(2.5 * dt);
+    if (!this.onFoot) return;
+    const k = S.keys;
+    const camYaw = S.camYaw;
+    let ix = 0;
+    let iz = 0;
+    if (k['KeyW'] || k['ArrowUp']) iz -= 1;
+    if (k['KeyS'] || k['ArrowDown']) iz += 1;
+    if (k['KeyA'] || k['ArrowLeft']) ix -= 1;
+    if (k['KeyD'] || k['ArrowRight']) ix += 1;
+    const moving = ix !== 0 || iz !== 0;
+    const sprint = !!(k['ShiftLeft'] || k['ShiftRight']);
+    const topSpeed = sprint ? 9.5 : 5.4;
+    if (moving) {
+      // Camera-relative movement: forward is where the camera looks.
+      // f = (-sin yaw, -cos yaw), r = (cos yaw, -sin yaw); W pushes along f.
+      const sin = Math.sin(camYaw);
+      const cos = Math.cos(camYaw);
+      const wx = ix * cos + iz * sin;
+      const wz = -ix * sin + iz * cos;
+      const len = Math.hypot(wx, wz) || 1;
+      const targetHeading = Math.atan2(-wx / len, -wz / len);
+      this.heading = angleDamp(this.heading, targetHeading, 12, dt);
+      this.speed = damp(this.speed, topSpeed, 8, dt);
+      const nx = this.x + (-Math.sin(this.heading)) * this.speed * dt;
+      const nz = this.z + (-Math.cos(this.heading)) * this.speed * dt;
+      const probe = { x: nx, z: nz };
+      resolveCollision(S.city, probe, 0.55);
+      this.x = clamp(probe.x, -S.city.bound, 192);
+      this.z = clamp(probe.z, -S.city.bound, 176);
+      this.walkPhase += dt * this.speed * 1.7;
+    } else {
+      this.speed = damp(this.speed, 0, 10, dt);
+      this.walkPhase = damp(this.walkPhase, Math.round(this.walkPhase / Math.PI) * Math.PI, 10, dt);
+    }
+    // Jump.
+    if ((k['Space']) && this.y === 0) {
+      this.vy = 7.2;
+      this.y = 0.01;
+    }
+    if (this.y > 0 || this.vy !== 0) {
+      this.vy -= 22 * dt;
+      this.y += this.vy * dt;
+      if (this.y <= 0) {
+        this.y = 0;
+        this.vy = 0;
+      }
+    }
+    // Walk-cycle limb swing, scaled by speed.
+    const swing = Math.sin(this.walkPhase) * clamp(this.speed / 5.4, 0, 1.4) * 0.75;
+    this.rig.legL.rotation.x = swing;
+    this.rig.legR.rotation.x = -swing;
+    this.rig.armL.rotation.x = -swing * 0.8;
+    this.rig.armR.rotation.x = swing * 0.8;
+    this.rig.torso.position.y = 1.18 + Math.abs(Math.sin(this.walkPhase)) * 0.05 * clamp(this.speed / 5.4, 0, 1);
+    this.syncMesh();
+  }
 }
