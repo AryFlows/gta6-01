@@ -1,91 +1,101 @@
-// Solmar: Streets of Solmar — the gta6-01 entry program (Node 22, standard
-// library only). The game is this directory's game/ folder: plain static
-// files a desktop browser loads offline (game/index.html, its ES modules,
-// and three.js vendored as an ES module under game/vendor/), plus 3 or 4
-// screenshots of the game itself under screenshots/ (the first by name is
-// the cover). This program copies both folders from beside this file to
-// /output and writes /output/dossier.json — the summary the judge reads —
-// with the vendored make.fun library, exactly as the kit's starter does.
+// Vellora Bay — the entrypoint (Node 22, standard library only).
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+// This program hands the game in. It copies the playable static game in game/
+// and the screenshots in screenshots/ from beside this file into the output
+// directory (/output in the grader, MAKEFUN_OUTPUT_DIR anywhere else), then
+// writes /output/dossier.json with the kit library's buildDossier, so the
+// judge reads exactly the game that is on disk. Before writing the dossier it
+// sanity-checks the hand-in the way the scorer will: the game tree fits its
+// caps, every screenshot is a PNG or JPEG inside its size cap, and the entry
+// point the page loads actually exists.
+//
+// Run it from the repository root with:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-
+// and serve the game locally with `node serve.ts` (http://localhost:8080).
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)));
+const outputDir = resolve(process.env.MAKEFUN_OUTPUT_DIR ?? '/output');
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes
-// the bytes; the other limits refuse an entry the scorer would refuse —
-// more than 4 screenshots or one over 256 KiB, more than 993 files in
-// game/ or 48 MiB of game files in all, or a path under game/ over 1000
-// bytes. game/ counts beside /output's own 1000-entry cap, its screenshots/
-// and dossier.json, so check the counts here before writing anything.
-const GAME_MAX_FILES = 993;
-const GAME_MAX_BYTES = 50331648;
+// The scorer's own caps, from the kit's gate: the dossier text is capped at
+// 160 KiB, screenshots at 4 files of 256 KiB, game/ at 993 entries / 48 MiB.
+const DOSSIER_CAPS = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  game_max_files: 993,
+  game_max_bytes: 50331648,
+  game_path_max_bytes: 1000,
+};
 
-function countGame(dir) {
+function fail(message) {
+  throw new Error('vellora entry: ' + message);
+}
+
+function countTree(dir) {
   let files = 0;
   let bytes = 0;
   for (const name of readdirSync(dir)) {
-    const p = join(dir, name);
-    const st = statSync(p);
+    const full = join(dir, name);
+    const st = statSync(full);
     if (st.isDirectory()) {
-      const sub = countGame(p);
-      files += sub.files + 1;
+      const sub = countTree(full);
+      files += sub.files;
       bytes += sub.bytes;
     } else if (st.isFile()) {
       files += 1;
       bytes += st.size;
-    } else {
-      throw new Error('game/ holds a non-file, non-directory entry: ' + p);
     }
   }
   return { files, bytes };
 }
 
-const gameDir = join(here, 'game');
-const shotDir = join(here, 'screenshots');
-const tally = countGame(gameDir);
-if (tally.files > GAME_MAX_FILES) {
-  throw new Error(`game/ has ${tally.files} files, over the ${GAME_MAX_FILES} cap`);
-}
-if (tally.bytes > GAME_MAX_BYTES) {
-  throw new Error(`game/ is ${tally.bytes} bytes, over the ${GAME_MAX_BYTES} cap`);
-}
-
-const shots = existsSync(shotDir)
-  ? readdirSync(shotDir).filter((n) => !n.startsWith('.')).sort()
-  : [];
-if (shots.length < 3 || shots.length > 4) {
-  throw new Error(`screenshots/ must hold 3 or 4 images, found ${shots.length}`);
-}
-for (const name of shots) {
-  const st = statSync(join(shotDir, name));
-  if (!st.isFile() || st.size > 262144) {
-    throw new Error(`screenshot ${name} is not a file under 256 KiB`);
+function checkShots(dir) {
+  if (!existsSync(dir)) fail('screenshots/ is missing from the repository');
+  const shots = readdirSync(dir).filter((n) => !n.startsWith('.'));
+  if (shots.length < 3 || shots.length > DOSSIER_CAPS.screenshots.max) {
+    fail('expected 3 or 4 screenshots, found ' + shots.length);
   }
-  if (!/\.(png|jpg|jpeg)$/i.test(name)) {
-    throw new Error(`screenshot ${name} is not a PNG or JPEG`);
+  for (const name of shots) {
+    const full = join(dir, name);
+    const st = statSync(full);
+    if (!st.isFile()) fail('screenshot ' + name + ' is not a regular file');
+    if (!/\.(png|jpe?g)$/i.test(name)) fail('screenshot ' + name + ' is not a PNG or JPEG');
+    if (st.size > DOSSIER_CAPS.screenshots.max_bytes) {
+      fail('screenshot ' + name + ' is ' + st.size + ' bytes, over the 256 KiB cap');
+    }
   }
+  return shots;
 }
 
-mkdirSync(out, { recursive: true });
-cpSync(gameDir, join(out, 'game'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-cpSync(shotDir, join(out, 'screenshots'), { recursive: true });
+function checkGame(dir) {
+  if (!existsSync(join(dir, 'index.html'))) fail('game/index.html is missing');
+  const tree = countTree(dir);
+  if (tree.files > DOSSIER_CAPS.game_max_files) {
+    fail('game/ has ' + tree.files + ' files, over the 993 cap');
+  }
+  if (tree.bytes > DOSSIER_CAPS.game_max_bytes) {
+    fail('game/ is ' + tree.bytes + ' bytes, over the 48 MiB cap');
+  }
+  return tree;
+}
 
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    game_max_files: GAME_MAX_FILES,
-    game_max_bytes: GAME_MAX_BYTES,
-    game_path_max_bytes: 1000,
-  }),
-);
+function handIn() {
+  const gameDir = join(repoRoot, 'game');
+  const shotsDir = join(repoRoot, 'screenshots');
+  const tree = checkGame(gameDir);
+  const shots = checkShots(shotsDir);
+  mkdirSync(outputDir, { recursive: true });
+  cpSync(gameDir, join(outputDir, 'game'), { recursive: true });
+  cpSync(shotsDir, join(outputDir, 'screenshots'), { recursive: true });
+  const dossier = buildDossier(outputDir, DOSSIER_CAPS);
+  writeFileSync(join(outputDir, 'dossier.json'), dossier);
+  const dossierBytes = Buffer.byteLength(dossier, 'utf8');
+  if (dossierBytes > 1572864) fail('dossier.json is ' + dossierBytes + ' bytes, over the 1.5 MiB cap');
+  console.log('Vellora Bay handed in: ' + tree.files + ' game files (' + tree.bytes + ' bytes), '
+    + shots.length + ' screenshots, dossier.json ' + dossierBytes + ' bytes -> ' + outputDir);
+}
+
+handIn();
