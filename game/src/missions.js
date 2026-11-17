@@ -1,225 +1,337 @@
-// missions.js — "The Solmar Job": a four-job story arc from Mara Reyes,
-// then repeatable courier runs that pay by the delivery. Each mission has
-// a title, plain-language instructions, a target on the map, and a payout.
-// The manager owns the beacon and ground ring that mark the target.
+// Vellora Bay — missions and story. A four-job story chain (steal a car, grab
+// a package at the Docks under guard, lose the heat, drop it at a cafe), then
+// a rival-gang turf chain, then repeatable timed courier runs. A light pillar
+// and a pulsing ground ring mark the target; the HUD narrates each job.
+import { dist2, clamp } from './util.js';
+import { writeSave } from './save.js';
+import { ROAD_LINES } from './city.js';
 
-import { dist2D, rand, pick, money } from './util.js';
-import { makeBeacon, makeMarkerRing } from './police.js';
-
-export const STORY = [
+const STORY = [
   {
-    id: 'wheels',
-    title: 'Hot Wheels',
-    brief: 'Mara needs wheels. Walk up to any parked car and press E to take it.',
-    hint: 'Parked cars line the roads — any of them will do.',
-    reward: 200,
+    id: 'borrowed-wheels', title: 'Job 1 — Borrowed Wheels',
+    brief: 'You are new in Vellora Bay and broke. Your fixer Mara needs wheels — take any parked car on the street.',
+    hint: 'Walk up to a parked car and press E. The owner will not mind. Much.',
+    target: null, reward: 150,
   },
   {
-    id: 'pickup',
-    title: 'The Pickup',
-    brief: 'Drive to the Docks and grab the package. Press E at the marker.',
-    hint: 'Follow the yellow beacon to the pier, south-west.',
-    reward: 300,
+    id: 'dockside-pickup', title: 'Job 2 — Dockside Pickup',
+    brief: 'Mara stashed a package at the Docks pier. The Red Tide crew is guarding it — clear them out, then grab the package.',
+    hint: 'Deal with the thugs at the pier first, then walk into the ring and press E.',
+    target: null, reward: 400,
   },
   {
-    id: 'heat',
-    title: 'Heat Wave',
-    brief: 'The cops saw the handoff. Lose them — stay out of sight until the stars clear.',
-    hint: 'Break line of sight and keep moving. The stars fade while hidden.',
-    reward: 500,
+    id: 'cool-off', title: 'Job 3 — Cool Off',
+    brief: 'The pickup put heat on you. Lose the VBPD — break line of sight and stay quiet until the stars fade.',
+    hint: 'Drive away from the cruisers. The stars drop once nobody is close for a while.',
+    target: null, reward: 250,
   },
   {
-    id: 'drop',
-    title: 'The Drop',
-    brief: 'Deliver the package to Mara at the Sunset Cafe. Press E at the marker.',
-    hint: 'The cafe sits on the north-east side of town.',
-    reward: 2500,
+    id: 'cafe-drop', title: 'Job 4 — Cafe Drop',
+    brief: 'Take the package to the cafe on Neon Row. Walk it in on foot — Mara hates tire marks on her patio.',
+    hint: 'Head for the marker. Step into the ring on foot to hand it over.',
+    target: null, reward: 600,
   },
 ];
 
-export function createMissions(scene, city) {
-  const beacon = makeBeacon(scene, 0xffd23c);
-  const ring = makeMarkerRing(scene, 0xffd23c);
-  beacon.visible = false;
-  ring.visible = false;
-  return {
-    scene,
-    city,
-    index: 0,            // next story mission to run
-    current: null,       // active mission record
-    beacon,
-    ring,
-    target: null,        // {x, z, label}
-    packageHeld: false,
-    storyDone: false,
-    side: null,          // active courier job
-    sideTimer: 0,
-    courierCount: 0,
-    thugsSpawned: false,
-  };
-}
+const TURF = [
+  {
+    id: 'turf-pier', title: 'Turf 1 — Pier Pressure',
+    brief: 'The Red Tide crew wants the pier back. Hold it: clear their four enforcers off the docks.',
+    hint: 'Four thugs on the pier. Use cover, use the pistol, use your fists.',
+    target: null, reward: 800,
+  },
+  {
+    id: 'turf-neon', title: 'Turf 2 — Neon Row',
+    brief: 'Their runners deal on Neon Row now. Four more thugs — send them a message the whole block can hear.',
+    hint: 'Clear the four rivals on Neon Row, east of the plaza.',
+    target: null, reward: 1000,
+  },
+  {
+    id: 'turf-king', title: 'Turf 3 — King of the Bay',
+    brief: 'One last run: carry the turf papers to the plaza fountain while the VBPD hunts you at three stars. Make it loud, make it count.',
+    hint: 'Reach the plaza fountain with the papers. You start this job hot.',
+    target: null, reward: 1500,
+  },
+];
 
-export function startMission(M, idx, hooks) {
-  const def = STORY[idx];
-  if (!def) return null;
-  const mission = {
-    id: def.id,
-    title: def.title,
-    brief: def.brief,
-    hint: def.hint,
-    reward: def.reward,
-    state: 'active',
-  };
-  M.current = mission;
-  M.index = idx;
-  if (def.id === 'pickup') {
-    // The package waits at the pier's east edge: on open ground the player
-    // can reach on foot (the pier deck itself is fenced by its own bulk).
-    M.target = { x: M.city.docksPos.x + 17, z: M.city.docksPos.z, label: 'The Docks' };
-    if (hooks && hooks.onPickupStart) hooks.onPickupStart();
-  } else if (def.id === 'heat') {
-    M.target = null;
-    if (hooks && hooks.onHeatStart) hooks.onHeatStart();
-  } else if (def.id === 'drop') {
-    M.target = { x: M.city.cafePos.x, z: M.city.cafePos.z, label: 'Sunset Cafe' };
-  } else {
-    M.target = null;
+export class Missions {
+  constructor(S) {
+    this.S = S;
+    this.storyIndex = 0;
+    this.turfIndex = 0;
+    this.turfUnlocked = false;
+    this.storyDone = false;
+    this.turfDone = false;
+    this.couriersDone = 0;
+    this.packageHeld = false;
+    this.courier = null; // {target, deadline, reward}
+    this.thugsNeeded = 0;
+    this.thugsDown = 0;
+    this.current = null;
+    // Beacon: a light pillar and a pulsing ring at the target.
+    const THREE = S.THREE;
+    this.beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.3, 1.3, 20, 16, 1, true),
+      new THREE.MeshBasicMaterial({ color: '#ffd94d', transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    this.beacon.position.y = 10;
+    S.scene.add(this.beacon);
+    this.ring = new THREE.Mesh(
+      new THREE.RingGeometry(2.3, 3.2, 28),
+      new THREE.MeshBasicMaterial({ color: '#ffd94d', transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    this.ring.rotation.x = -Math.PI / 2;
+    this.ring.position.y = 0.12;
+    S.scene.add(this.ring);
+    this.beacon.visible = false;
+    this.ring.visible = false;
+    this.setJob(this.storyJob());
   }
-  updateMarker(M);
-  return mission;
-}
 
-export function updateMarker(M) {
-  if (M.target) {
-    M.beacon.visible = true;
-    M.ring.visible = true;
-    M.beacon.position.set(M.target.x, 45, M.target.z);
-    M.ring.position.set(M.target.x, 0.08, M.target.z);
-  } else {
-    M.beacon.visible = false;
-    M.ring.visible = false;
+  get target() {
+    return this.current && this.current.target ? this.current.target : null;
   }
-}
 
-export function completeMission(M, hooks) {
-  const m = M.current;
-  if (!m) return;
-  m.state = 'done';
-  M.current = null;
-  M.target = null;
-  updateMarker(M);
-  // Advance first, then tell the hooks: the autosave in onComplete must
-  // record the NEXT mission, not the one just finished.
-  const next = M.index + 1;
-  if (next < STORY.length) {
-    startMission(M, next, hooks);
-  } else {
-    M.storyDone = true;
-    if (hooks && hooks.onStoryDone) hooks.onStoryDone();
+  storyJob() {
+    const def = STORY[this.storyIndex];
+    if (!def) return null;
+    const job = Object.assign({}, def);
+    if (job.id === 'borrowed-wheels') {
+      const spot = this.S.city.carSpawns[0];
+      job.target = { x: spot.x, z: spot.z, label: 'a parked car' };
+    } else if (job.id === 'dockside-pickup' || job.id === 'turf-pier') {
+      job.target = { x: this.S.city.docks.x, z: this.S.city.docks.z, y: 1.1, label: 'the Docks pier' };
+    } else if (job.id === 'cafe-drop') {
+      job.target = { x: this.S.city.cafe.x, z: this.S.city.cafe.z, label: 'the cafe' };
+    } else if (job.id === 'cool-off') {
+      job.target = null;
+    }
+    return job;
   }
-  if (hooks) {
-    // Pay first: the autosave inside onComplete must include the reward.
-    if (hooks.addCash) hooks.addCash(m.reward);
-    if (hooks.onComplete) hooks.onComplete(m);
-  }
-}
 
-// Check the active mission's completion condition. Call once a frame with
-// the live game state; returns a short status string for the HUD when the
-// player is near a target, else null.
-export function updateMissions(M, ctx, dt) {
-  const p = ctx.player;
-  const px = p.car ? p.car.x : p.x;
-  const pz = p.car ? p.car.z : p.z;
-  // Courier side jobs tick down while the story is finished.
-  if (M.storyDone && M.side) {
-    M.sideTimer -= dt;
-    if (M.sideTimer <= 0) {
-      M.side = null;
-      M.target = null;
-      updateMarker(M);
-      if (ctx.toast) ctx.toast('Courier run failed — the client walked away.');
+  turfJob() {
+    const def = TURF[this.turfIndex];
+    if (!def) return null;
+    const job = Object.assign({}, def);
+    if (job.id === 'turf-pier') job.target = { x: this.S.city.docks.x, z: this.S.city.docks.z, y: 1.1, label: 'the Docks pier' };
+    else if (job.id === 'turf-neon') job.target = { x: 38, z: 38, label: 'Neon Row' };
+    else if (job.id === 'turf-king') job.target = { x: 0, z: 0, label: 'the plaza fountain' };
+    return job;
+  }
+
+  setJob(job) {
+    this.current = job;
+    this.packageHeld = false;
+    this.thugsDown = 0;
+    this.thugsNeeded = 0;
+    if (job && (job.id === 'dockside-pickup' || job.id === 'turf-pier')) {
+      this.spawnGuardSquad(this.S.city.docks.x, this.S.city.docks.z, job.id === 'turf-pier' ? 4 : 3);
+    } else if (job && job.id === 'turf-neon') {
+      this.spawnGuardSquad(38, 38, 4);
+    }
+    if (job && job.id === 'turf-king') {
+      this.S.police.wanted = 3;
+      if (this.S.hud) this.S.hud.setStars(3);
+      this.packageHeld = true;
+    }
+    if (job && this.S.hud) this.S.hud.setMission(job);
+    this.placeBeacon();
+  }
+
+  spawnGuardSquad(x, z, n) {
+    this.S.combat.clearThugs();
+    this.thugsNeeded = n;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      this.S.combat.spawnThug(x + Math.cos(a) * 6, z + Math.sin(a) * 6);
     }
   }
-  if (!M.current) return null;
-  const m = M.current;
-  if (m.id === 'wheels') {
-    if (p.car) {
-      completeMission(M, ctx.hooks);
-      return 'stolen';
+
+  placeBeacon() {
+    const t = this.target;
+    if (t) {
+      const gy = t.y || 0;
+      this.beacon.position.x = t.x;
+      this.beacon.position.z = t.z;
+      this.beacon.position.y = gy + 10;
+      this.ring.position.x = t.x;
+      this.ring.position.z = t.z;
+      this.ring.position.y = gy + 0.15;
+      this.beacon.visible = true;
+      this.ring.visible = true;
+    } else {
+      this.beacon.visible = false;
+      this.ring.visible = false;
     }
-    return null;
   }
-  if (m.id === 'pickup') {
-    if (M.target && dist2D(px, pz, M.target.x, M.target.z) < 6) {
-      if (!p.car) {
-        if (ctx.interactPressed) {
-          M.packageHeld = true;
-          completeMission(M, ctx.hooks);
-          return 'picked-up';
+
+  onCarStolen(car) {
+    if (this.current && this.current.id === 'borrowed-wheels') {
+      this.completeJob('Nice — clean lift. Mara is impressed.');
+    }
+  }
+
+  onThugDown(thug) {
+    if (!this.current) return;
+    const guardJobs = ['dockside-pickup', 'turf-pier', 'turf-neon'];
+    if (guardJobs.includes(this.current.id)) {
+      this.thugsDown++;
+      const left = this.thugsNeeded - this.thugsDown;
+      if (left > 0) {
+        this.S.hud.toast(left + (left === 1 ? ' thug' : ' thugs') + ' left.');
+      } else {
+        this.S.hud.toast('Area clear. Grab the package in the ring.');
+        if (this.current.id === 'turf-pier' || this.current.id === 'turf-neon') {
+          this.completeJob('Turf taken. The block is yours.');
         }
-        return 'Press E — Grab the package';
       }
-      return 'Get out of the car to grab the package';
     }
-    return null;
   }
-  if (m.id === 'heat') {
-    if (ctx.wanted.level === 0) {
-      completeMission(M, ctx.hooks);
-      return 'clean';
-    }
-    return null;
+
+  onArrested() {
+    // An arrest drops the package and restarts the current job from its start.
+    this.packageHeld = false;
+    this.courier = null;
+    if (!this.storyDone) this.setJob(this.storyJob());
+    else if (this.turfUnlocked && !this.turfDone) this.setJob(this.turfJob());
+    else this.startCourier();
   }
-  if (m.id === 'drop') {
-    if (M.target && dist2D(px, pz, M.target.x, M.target.z) < 6) {
-      if (!p.car) {
-        if (ctx.interactPressed) {
-          M.packageHeld = false;
-          completeMission(M, ctx.hooks);
-          return 'delivered';
-        }
-        return 'Press E — Hand Mara the package';
+
+  tryGrab() {
+    const S = this.S;
+    const job = this.current;
+    if (!job || !job.target) return false;
+    const p = S.player;
+    if (dist2(p.x, p.z, job.target.x, job.target.z) > 4.5) return false;
+    if (job.id === 'dockside-pickup') {
+      if (this.thugsDown < this.thugsNeeded) {
+        S.hud.toast('Clear the thugs first — the package is guarded.');
+        return false;
       }
-      return 'Get out of the car to make the drop';
+      this.packageHeld = true;
+      S.police.addHeat(2, 'grabbed the package');
+      S.audio.pickup();
+      this.completeJob('Package secured. Now lose the heat.');
+      return true;
     }
-    return null;
+    if (job.id === 'cafe-drop') {
+      if (!p.onFoot) {
+        S.hud.toast('Mara wants this on foot — park the car and walk in.');
+        return false;
+      }
+      this.completeJob('Delivered. Mara pays in cash, like always.');
+      return true;
+    }
+    if (job.id === 'turf-king') {
+      this.completeJob('King of the Bay. Vellora is yours tonight.');
+      return true;
+    }
+    if (job.id === 'courier-run') return this.finishCourier();
+    return false;
   }
-  return null;
-}
 
-// Start a repeatable courier run after the story ends: a random drop
-// point, a countdown, and a payout that scales with the distance.
-export function startCourier(M, ctx) {
-  if (!M.storyDone || M.side) return null;
-  const lines = M.city.roadLines;
-  const tx = pick(lines) + (Math.random() < 0.5 ? -3 : 3);
-  const tz = pick(lines);
-  const px = ctx.player.car ? ctx.player.car.x : ctx.player.x;
-  const pz = ctx.player.car ? ctx.player.car.z : ctx.player.z;
-  const d = dist2D(px, pz, tx, tz);
-  const reward = Math.round(300 + d * 1.2);
-  M.side = { x: tx, z: tz, reward };
-  M.sideTimer = Math.max(45, d / 9 + 30);
-  M.target = { x: tx, z: tz, label: 'Courier drop' };
-  updateMarker(M);
-  return M.side;
-}
+  completeJob(line) {
+    const S = this.S;
+    const job = this.current;
+    if (!job) return;
+    S.cash += job.reward;
+    S.hud.toast(line + '  +$' + job.reward);
+    S.audio.jingle(true);
+    S.audio.cash();
+    if (job.id === 'courier-run') {
+      this.couriersDone++;
+      this.courier = null;
+    } else if (STORY.some((d) => d.id === job.id)) {
+      this.storyIndex++;
+      if (this.storyIndex >= STORY.length) {
+        this.storyDone = true;
+        this.turfUnlocked = true;
+        S.hud.toast('Story complete! A rival crew is moving on your turf — new jobs open.');
+      }
+    } else if (TURF.some((d) => d.id === job.id)) {
+      this.turfIndex++;
+      if (this.turfIndex >= TURF.length) this.turfDone = true;
+    }
+    writeSave(S);
+    this.advance();
+  }
 
-// Finish a courier run when the player reaches the marker on foot or by car.
-export function checkCourier(M, ctx) {
-  if (!M.side) return false;
-  const p = ctx.player;
-  const px = p.car ? p.car.x : p.x;
-  const pz = p.car ? p.car.z : p.z;
-  if (dist2D(px, pz, M.side.x, M.side.z) < 6) {
-    if (ctx.hooks && ctx.hooks.addCash) ctx.hooks.addCash(M.side.reward);
-    if (ctx.toast) ctx.toast('Courier run complete — ' + money(M.side.reward) + ' earned.');
-    M.courierCount++;
-    M.side = null;
-    M.target = null;
-    updateMarker(M);
+  advance() {
+    if (!this.storyDone) this.setJob(this.storyJob());
+    else if (this.turfUnlocked && !this.turfDone) this.setJob(this.turfJob());
+    else this.startCourier();
+  }
+
+  startCourier() {
+    const S = this.S;
+    const ix = Math.floor(S.traffic.rng() * ROAD_LINES.length);
+    const iz = Math.floor(S.traffic.rng() * ROAD_LINES.length);
+    const tx = ROAD_LINES[ix];
+    const tz = ROAD_LINES[iz];
+    const p = S.player;
+    if (dist2(p.x, p.z, tx, tz) < 30) {
+      // Too close to be a run — pick the far corner instead.
+      this.courier = { target: { x: -tx, z: -tz, label: 'the courier drop' }, deadline: 75, reward: 200 };
+    } else {
+      this.courier = { target: { x: tx, z: tz, label: 'the courier drop' }, deadline: 75, reward: 200 };
+    }
+    this.current = {
+      id: 'courier-run', title: 'Courier Run — $' + this.courier.reward + ' (+time bonus)',
+      brief: 'A paying customer needs a parcel across town, fast. Beat the clock.',
+      hint: 'Reach the ring before the timer runs out. Faster pays more.',
+      target: this.courier.target, reward: this.courier.reward,
+    };
+    this.thugsNeeded = 0;
+    this.thugsDown = 0;
+    S.hud.setMission(this.current);
+    this.placeBeacon();
+  }
+
+  finishCourier() {
+    const S = this.S;
+    const timeLeft = this.courier ? Math.max(0, this.courier.deadline) : 0;
+    const bonus = Math.round(timeLeft * 2);
+    this.current.reward = this.courier.reward + bonus;
+    this.completeJob('Parcel delivered with ' + Math.round(timeLeft) + 's to spare. Bonus +$' + bonus + '.');
     return true;
   }
-  return false;
+
+  applySave(data) {
+    this.storyIndex = clamp(data.storyIndex || 0, 0, STORY.length);
+    this.turfIndex = clamp(data.turfIndex || 0, 0, TURF.length);
+    this.turfUnlocked = !!data.turfUnlocked;
+    this.couriersDone = data.couriersDone || 0;
+    this.storyDone = !!data.storyDone;
+    this.turfDone = !!data.turfDone;
+    this.advance();
+  }
+
+  update(dt) {
+    const S = this.S;
+    if (!S.started || S.paused || S.over) return;
+    // Beacon pulse.
+    if (this.ring.visible) {
+      const pulse = 1 + Math.sin(S.time * 3.2) * 0.14;
+      this.ring.scale.set(pulse, pulse, 1);
+      this.ring.material.opacity = 0.6 + Math.sin(S.time * 3.2) * 0.25;
+    }
+    if (!this.current) return;
+    const job = this.current;
+    // Job 3 completes the moment the heat is gone.
+    if (job.id === 'cool-off' && S.police.stars === 0) {
+      this.completeJob('Clean. Not a cruiser in sight.');
+      return;
+    }
+    // Courier countdown.
+    if (job.id === 'courier-run' && this.courier) {
+      this.courier.deadline -= dt;
+      if (this.courier.deadline <= 0) {
+        S.hud.toast('Too slow — the customer cancelled. Another run is ready.');
+        S.audio.bad();
+        this.startCourier();
+        return;
+      }
+      S.hud.setCourierTime(Math.max(0, this.courier.deadline));
+    }
+  }
 }

@@ -1,175 +1,197 @@
-// police.js — the wanted system and the Solmar PD response.
-// Stars rise when the player steals, hits people or shoots; police cruisers
-// spawn on the roads, chase, and ram. Stay out of sight and the heat cools
-// one star at a time. Getting caught on foot at low health means BUSTED.
+// Vellora Bay — the wanted system and the VBPD. Heat runs 0–5 stars: stealing,
+// crashing and shooting raise it, and cruisers spawn to chase and ram. Lose
+// them, stay out of sight, and the heat cools. Get caught on foot and you are
+// busted; lose all your health and you are wasted. Either way it costs cash.
+import { clamp, dist2, headingToward, makeRng, pick } from './util.js';
+import { ROAD_LINES } from './city.js';
+import { DriveCar } from './vehicles.js';
 
-import * as THREE from '../vendor/three.module.min.js';
-import { clamp, rand, pick, dist2D, angleDelta } from './util.js';
-import { makeCar, bumpCars, bounceCars } from './vehicles.js';
-import { audio } from './audio.js';
+const STAR_NAMES = ['', 'One star', 'Two stars', 'Three stars', 'Four stars', 'Five stars'];
 
-export const MAX_WANTED = 5;
-
-// Heat cost of each crime, in stars.
-export const CRIME_HEAT = {
-  stealCar: 1,
-  hitPed: 1,
-  shoot: 1,
-  punchPed: 1,
-  ramPolice: 1,
-};
-
-export function createWanted() {
-  return {
-    level: 0,
-    heat: 0,          // 0..100 within the current star; cools while hidden
-    hiddenTimer: 0,   // seconds since any cruiser last saw the player
-    busted: false,
-    wasted: false,
-  };
-}
-
-export function addWanted(wanted, stars) {
-  wanted.level = clamp(wanted.level + stars, 0, MAX_WANTED);
-  wanted.heat = 100;
-  wanted.hiddenTimer = 0;
-  audio.setSiren(wanted.level > 0);
-}
-
-export function clearWanted(wanted) {
-  wanted.level = 0;
-  wanted.heat = 0;
-  wanted.hiddenTimer = 0;
-  audio.setSiren(false);
-}
-
-// One frame of the wanted clock: cool down while no cruiser is near.
-export function updateWanted(wanted, dt, policeCars, playerX, playerZ) {
-  if (wanted.level <= 0) return;
-  let nearest = 9999;
-  for (const pc of policeCars) nearest = Math.min(nearest, dist2D(pc.x, pc.z, playerX, playerZ));
-  if (nearest > 70) {
-    wanted.hiddenTimer += dt;
-    wanted.heat -= dt * 9;
-    if (wanted.heat <= 0) {
-      wanted.level -= 1;
-      wanted.heat = 100;
-      if (wanted.level <= 0) {
-        wanted.level = 0;
-        wanted.heat = 0;
-        audio.setSiren(false);
-      }
-    }
-  } else {
-    wanted.hiddenTimer = 0;
-    wanted.heat = Math.min(100, wanted.heat + dt * 4);
+export class Police {
+  constructor(S) {
+    this.S = S;
+    this.rng = makeRng(31337);
+    this.wanted = 0; // float; HUD shows the ceiling as stars
+    this.cruisers = [];
+    this.coolTimer = 0;
+    this.nearTimer = 0;
+    this.bustedTimer = 0;
+    this.sirenOn = false;
   }
-}
 
-// Keep the right number of cruisers on the street for the wanted level.
-export function syncPoliceCount(scene, policeCars, wanted, playerX, playerZ, roadLines) {
-  const want = Math.min(wanted.level + 1, 6);
-  while (policeCars.length < want) {
-    const line = pick(roadLines);
-    const vertical = Math.random() < 0.5;
-    const along = (Math.random() < 0.5 ? -1 : 1) * rand(60, 110);
-    const x = vertical ? line + 3.4 : playerX + along;
-    const z = vertical ? playerZ + along : line + 3.4;
-    const car = makeCar(scene, 'police', clamp(x, -280, 280), clamp(z, -280, 320), rand(0, Math.PI * 2));
+  get stars() {
+    return clamp(Math.ceil(this.wanted - 0.001), 0, 5);
+  }
+
+  addHeat(amount, reason) {
+    if (this.S.over) return;
+    const before = this.stars;
+    this.wanted = clamp(this.wanted + amount, 0, 5);
+    if (this.stars > before) {
+      this.S.hud.setStars(this.stars);
+      this.S.hud.toast(STAR_NAMES[this.stars] + ' wanted — the VBPD is coming for you.' + (reason ? ' (' + reason + ')' : ''));
+      if (this.S.audio) this.S.audio.bad();
+    }
+    this.coolTimer = 0;
+  }
+
+  clearHeat(silent) {
+    this.wanted = 0;
+    this.S.hud.setStars(0);
+    for (const c of this.cruisers) c.dispose();
+    this.cruisers = [];
+    this.setSiren(false);
+    if (!silent) this.S.hud.toast('Heat is off. Vellora forgets quickly — for a price.');
+  }
+
+  setSiren(on) {
+    if (on === this.sirenOn) return;
+    this.sirenOn = on;
+    if (this.S.audio) this.S.audio.setSiren(on);
+  }
+
+  spawnCruiser() {
+    const S = this.S;
+    const p = S.player;
+    const px = p.car ? p.car.x : p.x;
+    const pz = p.car ? p.car.z : p.z;
+    // Spawn on a road 45–70 m away, roughly in the player's direction of travel.
+    const line = pick(this.rng, ROAD_LINES);
+    const along = pick(this.rng, [-1, 1]) * (45 + this.rng() * 25);
+    const horizontal = this.rng() < 0.5;
+    const x = horizontal ? px + along : line;
+    const z = horizontal ? line : pz + along;
+    const cx = clamp(x, -140, 140);
+    const cz = clamp(z, -140, 140);
+    const car = new DriveCar(S, 'police', cx, cz, headingToward(cx, cz, px, pz));
+    car.driver = 'ai';
     car.parked = false;
-    car.speed = 0;
-    car.cruise = 0;
-    car.vertical = vertical;
-    car.line = line;
-    car.dir = 1;
-    car.wait = 0;
-    policeCars.push(car);
+    car.ai = { node: null, target: null, wait: 0, cruise: 20, chase: true };
+    this.cruisers.push(car);
+    return car;
   }
-  // Despawn the furthest cruisers when the heat drops.
-  while (policeCars.length > want) {
-    let far = 0;
-    let farD = -1;
-    policeCars.forEach((pc, i) => {
-      const d = dist2D(pc.x, pc.z, playerX, playerZ);
-      if (d > farD) { farD = d; far = i; }
-    });
-    const [gone] = policeCars.splice(far, 1);
-    gone.mesh.visible = false;
-    scene.remove(gone.mesh);
-  }
-}
 
-// Chase AI: cruisers steer toward the player and ram. They drive off-road
-// when they must, but prefer roads; a ram that lands hard hurts the player
-// on foot and shakes the player's car.
-export function updatePolice(policeCars, dt, player, colliders, onRam, onBust) {
-  const px = player.car ? player.car.x : player.x;
-  const pz = player.car ? player.car.z : player.z;
-  for (const pc of policeCars) {
-    const d = dist2D(pc.x, pc.z, px, pz);
-    const targetAngle = Math.atan2(px - pc.x, pz - pc.z);
-    const turn = clamp(angleDelta(pc.angle, targetAngle), -1, 1);
-    const accel = d > 12 ? 17 : 10;
-    pc.speed = clamp(pc.speed + accel * dt, 0, 30);
-    pc.angle += turn * 2.1 * dt * clamp(pc.speed / 8, 0.3, 1);
-    pc.x += Math.sin(pc.angle) * pc.speed * dt;
-    pc.z += Math.cos(pc.angle) * pc.speed * dt;
-    pc.x = clamp(pc.x, -290, 290);
-    pc.z = clamp(pc.z, -290, 330);
-    pc.mesh.position.set(pc.x, 0, pc.z);
-    pc.mesh.rotation.y = pc.angle;
-    pc.crashed = Math.max(0, pc.crashed - dt);
-    // Ram: on foot the hit hurts; in a car it shoves and slows both.
-    if (d < 3.6 && pc.speed > 5) {
-      if (player.car) {
-        if (pc.crashed <= 0) {
-          pc.crashed = 1.0;
-          player.car.speed *= 0.55;
-          if (onRam) onRam(pc.speed);
+  // Drop a cruiser at an exact spot — used to stage the chase screenshot with
+  // the pursuit already in frame behind the player.
+  spawnCruiserNear(x, z, heading, speed) {
+    const car = new DriveCar(this.S, 'police', x, z, heading);
+    car.driver = 'ai';
+    car.parked = false;
+    car.speed = speed || 18;
+    car.ai = { node: null, target: null, wait: 0, cruise: 24, chase: true };
+    this.cruisers.push(car);
+    return car;
+  }
+
+  update(dt) {
+    const S = this.S;
+    if (!S.started || S.paused || S.over) {
+      this.setSiren(false);
+      return;
+    }
+    const p = S.player;
+    const px = p.car ? p.car.x : p.x;
+    const pz = p.car ? p.car.z : p.z;
+    // Keep the cruiser count matched to the wanted level.
+    const wantCount = this.stars;
+    while (this.cruisers.length < wantCount) this.spawnCruiser();
+    while (this.cruisers.length > wantCount) {
+      const c = this.cruisers.pop();
+      c.dispose();
+    }
+    this.setSiren(this.cruisers.length > 0);
+    // Chase: steer straight at the player, ramming on contact.
+    let nearest = Infinity;
+    for (const cruiser of this.cruisers) {
+      const d = dist2(cruiser.x, cruiser.z, px, pz);
+      nearest = Math.min(nearest, d);
+      const wantHeading = headingToward(cruiser.x, cruiser.z, px, pz);
+      const diff = ((wantHeading - cruiser.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const input = { up: d > 6, down: false, left: diff > 0.18, right: diff < -0.18, hand: false };
+      // Back off a touch when about to ram, so the chase reads as driving.
+      if (d < 5) input.up = true;
+      cruiser.drive(dt, input);
+      // Ram the player's car (or the player on foot).
+      if (p.car && d < 3.1) {
+        const push = 2.2;
+        p.car.x += (p.car.x - cruiser.x) / Math.max(d, 0.5) * push * dt * 4;
+        p.car.z += (p.car.z - cruiser.z) / Math.max(d, 0.5) * push * dt * 4;
+        p.car.speed *= 0.985;
+        if (Math.abs(cruiser.speed) > 8 && S.time - (this.lastRamAt || 0) > 0.8) {
+          this.lastRamAt = S.time;
+          p.hurt(4, cruiser.x, cruiser.z);
+          S.hud.flashDamage();
         }
-      } else if (onBust && pc.crashed <= 0) {
-        pc.crashed = 1.2;
-        onBust(pc.speed);
+      } else if (!p.car && d < 2.2) {
+        p.hurt(7, cruiser.x, cruiser.z);
+      }
+      // Cruiser bumps into traffic cars.
+      for (const car of S.traffic.aiCars) {
+        if (car !== cruiser && car.driver === 'ai') cruiser.bump(car);
+      }
+    }
+    // Busted: a cruiser sits on top of the on-foot player for a while.
+    if (this.stars > 0 && !p.car && nearest < 3.4) {
+      this.bustedTimer += dt;
+      if (this.bustedTimer > 2.2) {
+        this.bustedTimer = 0;
+        this.busted();
+        return;
+      }
+    } else {
+      this.bustedTimer = Math.max(0, this.bustedTimer - dt * 2);
+    }
+    // Heat cools when no cruiser is close for a while.
+    if (this.stars > 0) {
+      if (nearest > 48) {
+        this.coolTimer += dt;
+        if (this.coolTimer > 7) {
+          this.wanted = Math.max(0, this.wanted - dt * 0.35);
+          S.hud.setStars(this.stars);
+        }
+      } else {
+        this.coolTimer = 0;
       }
     }
   }
-  for (let i = 0; i < policeCars.length; i++) {
-    for (let j = i + 1; j < policeCars.length; j++) {
-      if (bumpCars(policeCars[i], policeCars[j], 4.4)) bounceCars(policeCars[i], policeCars[j]);
-    }
-    if (player.car && bumpCars(policeCars[i], player.car, 4.4)) {
-      bounceCars(policeCars[i], player.car);
-    }
+
+  busted() {
+    const S = this.S;
+    const fine = Math.min(S.cash, 200);
+    S.cash -= fine;
+    S.hud.toast('BUSTED! The VBPD took $' + fine + ' in fines.');
+    this.finishArrest('BUSTED', 'The VBPD caught you on foot and fined you $' + fine + '.');
   }
-}
 
-// A glowing beacon column marks a mission target from across the city.
-export function makeBeacon(scene, color) {
-  const geo = new THREE.CylinderGeometry(1.6, 1.6, 90, 12, 1, true);
-  const mat = new THREE.MeshBasicMaterial({
-    color: color || 0xffd23c,
-    transparent: true,
-    opacity: 0.35,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.y = 45;
-  scene.add(mesh);
-  return mesh;
-}
+  wasted() {
+    const S = this.S;
+    const cost = Math.min(S.cash, 300);
+    S.cash -= cost;
+    S.hud.toast('WASTED! The hospital bill was $' + cost + '.');
+    this.finishArrest('WASTED', 'You went down in Vellora Bay. The hospital took $' + cost + '.');
+  }
 
-export function makeMarkerRing(scene, color) {
-  const geo = new THREE.RingGeometry(2.2, 3.0, 24);
-  const mat = new THREE.MeshBasicMaterial({
-    color: color || 0xffd23c,
-    transparent: true,
-    opacity: 0.85,
-    side: THREE.DoubleSide,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.y = 0.08;
-  scene.add(mesh);
-  return mesh;
+  finishArrest(title, line) {
+    const S = this.S;
+    this.wanted = 0;
+    S.hud.setStars(0);
+    for (const c of this.cruisers) c.dispose();
+    this.cruisers = [];
+    this.setSiren(false);
+    if (S.player.car) {
+      const car = S.player.car;
+      car.driver = null;
+      car.parked = true;
+      car.speed = 0;
+      S.player.car = null;
+      S.player.onFoot = true;
+      S.player.mesh.visible = true;
+    }
+    S.player.health = 100;
+    S.player.reset(6, 14, Math.PI);
+    S.missions.onArrested();
+    S.audio.jingle(false);
+    S.showEnd(title, line);
+  }
 }

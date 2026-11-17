@@ -1,163 +1,205 @@
-// combat.js — fists and a pistol, plus the rival crew that guards the
-// Docks during the Pickup. Shots are hitscan raycasts from the camera;
-// thugs are simple state machines that shoot back when the player is near.
+// Vellora Bay — combat. A pistol with a magazine and a reload, a punch for
+// close quarters, and thugs who shoot back. Shots are camera-centre raycasts
+// with a visible tracer so the player can see where the bullet went.
+import { clamp, dist2, makeRng, range } from './util.js';
+import { makeHumanoid } from './player.js';
 
-import * as THREE from '../vendor/three.module.min.js';
-import { dist2D, rand, pick } from './util.js';
-import { audio } from './audio.js';
+export class Combat {
+  constructor(S) {
+    this.S = S;
+    this.rng = makeRng(555);
+    this.ammo = 12;
+    this.magSize = 12;
+    this.reloading = 0;
+    this.shotCooldown = 0;
+    this.punchCooldown = 0;
+    this.thugs = [];
+    this.tracers = [];
+    this.raycaster = new S.THREE.Raycaster();
+  }
 
-export function createCombat() {
-  return {
-    thugs: [],
-    tracers: [],
-    muzzleFlash: 0,
-  };
-}
+  get canShoot() {
+    return this.ammo > 0 && this.reloading <= 0 && this.shotCooldown <= 0;
+  }
 
-// A rival thug: dark hoodie, armed, guards a spot until provoked.
-export function spawnThugs(scene, positions) {
-  const thugs = [];
-  for (const pos of positions) {
-    const g = new THREE.Group();
-    const hoodie = new THREE.MeshLambertMaterial({ color: 0x3a2a3a });
-    const skin = new THREE.MeshLambertMaterial({ color: 0x8a5a3a });
-    const pants = new THREE.MeshLambertMaterial({ color: 0x1a1a22 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.36), hoodie);
-    torso.position.y = 1.12;
-    g.add(torso);
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.4), skin);
-    head.position.y = 1.72;
-    g.add(head);
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.18, 0.46), hoodie);
-    hood.position.y = 1.95;
-    g.add(hood);
-    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5),
-      new THREE.MeshLambertMaterial({ color: 0x111111 }));
-    gun.position.set(0.3, 1.15, 0.3);
-    g.add(gun);
-    const legGeo = new THREE.BoxGeometry(0.2, 0.72, 0.2);
-    for (const sx of [-0.16, 0.16]) {
-      const leg = new THREE.Mesh(legGeo, pants);
-      leg.position.set(sx, 0.36, 0);
-      g.add(leg);
+  punch() {
+    const S = this.S;
+    if (this.punchCooldown > 0 || !S.player.onFoot) return;
+    this.punchCooldown = 0.45;
+    S.audio.punch();
+    const p = S.player;
+    const fx = -Math.sin(p.heading);
+    const fz = -Math.cos(p.heading);
+    for (const thug of this.thugs) {
+      if (thug.hp <= 0) continue;
+      const dx = thug.x - p.x;
+      const dz = thug.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 2.6 && (dx * fx + dz * fz) > 0) {
+        this.damageThug(thug, 26, p.x, p.z);
+        S.hud.toast('You landed a punch.');
+      }
     }
-    g.position.set(pos.x, 0, pos.z);
-    scene.add(g);
-    thugs.push({
-      mesh: g, x: pos.x, z: pos.z,
-      health: 60, angle: rand(0, Math.PI * 2),
-      shootTimer: rand(1, 2.5), state: 'guard',
+    // Punching a pedestrian is also a crime. Vellora has witnesses.
+    for (const ped of S.traffic.peds) {
+      const dx = ped.x - p.x;
+      const dz = ped.z - p.z;
+      if (Math.hypot(dx, dz) < 2.4 && (dx * fx + dz * fz) > 0) {
+        ped.state = 'flee';
+        ped.fleeT = 4;
+        S.police.addHeat(1, 'assaulted a pedestrian');
+      }
+    }
+  }
+
+  shoot() {
+    const S = this.S;
+    if (!this.canShoot || !S.player.onFoot) return;
+    if (this.ammo <= 0) {
+      S.audio.click();
+      S.hud.toast('Click — empty. Press R to reload.');
+      return;
+    }
+    this.ammo--;
+    this.shotCooldown = 0.22;
+    S.audio.shot();
+    S.traffic.scare(S.player.x, S.player.z, 26);
+    S.police.addHeat(0.5, 'fired a shot');
+    // Raycast from the camera through the crosshair.
+    this.raycaster.setFromCamera({ x: 0, y: 0 }, S.camera);
+    const targets = [];
+    for (const thug of this.thugs) {
+      if (thug.hp > 0) targets.push(thug.rig.group);
+    }
+    for (const car of S.traffic.aiCars) targets.push(car.mesh);
+    const hits = this.raycaster.intersectObjects(targets, true);
+    let end = null;
+    if (hits.length) {
+      const hit = hits[0];
+      end = hit.point;
+      let obj = hit.object;
+      while (obj && !obj.userData.thug && !obj.userData.car) obj = obj.parent;
+      if (obj && obj.userData.thug) {
+        this.damageThug(obj.userData.thug, 34, S.player.x, S.player.z);
+      } else if (obj && obj.userData.car) {
+        S.hud.toast('You shot a car — the owner will remember that.');
+        S.police.addHeat(0.5, 'shot a car');
+      }
+    }
+    if (!end) {
+      end = this.raycaster.ray.origin.clone().add(this.raycaster.ray.direction.clone().multiplyScalar(90));
+    }
+    this.spawnTracer(S.camera.position.clone(), end);
+    S.hud.setAmmo(this.ammo, this.magSize, this.reloading > 0);
+  }
+
+  reload() {
+    if (this.reloading > 0 || this.ammo === this.magSize) return;
+    this.reloading = 1.1;
+    this.S.audio.click();
+    this.S.hud.setAmmo(this.ammo, this.magSize, true);
+  }
+
+  spawnTracer(from, to) {
+    const S = this.S;
+    const geo = new S.THREE.BufferGeometry().setFromPoints([from, to]);
+    const line = new S.THREE.Line(geo, new S.THREE.LineBasicMaterial({ color: '#ffe9a0', transparent: true, opacity: 0.95 }));
+    S.scene.add(line);
+    this.tracers.push({ line, life: 0.09 });
+  }
+
+  spawnThug(x, z) {
+    const S = this.S;
+    const rig = makeHumanoid(S.THREE, {
+      shirt: '#1c1c22', pants: '#3a2a20', skin: '#a87850', hair: '#0c0c0c', scale: 1.04,
     });
+    rig.group.position.set(x, 0, z);
+    // A dark jacket marker so the player reads them as hostile at a glance.
+    const jacket = new S.THREE.Mesh(
+      new S.THREE.BoxGeometry(0.68, 0.3, 0.4),
+      new S.THREE.MeshStandardMaterial({ color: '#8a1a1a', roughness: 0.7 }),
+    );
+    jacket.position.y = 1.45;
+    rig.group.add(jacket);
+    S.scene.add(rig.group);
+    const thug = { rig, x, z, hp: 70, heading: 0, shootT: 1 + this.rng() * 1.5, phase: 0, dead: false };
+    rig.group.userData.thug = thug;
+    this.thugs.push(thug);
+    return thug;
   }
-  return thugs;
-}
 
-// Fist fight: damage the nearest thug or pedestrian within 2.2 metres.
-export function tryPunch(player, combat, peds, onHitPed) {
-  if (player.punchCooldown > 0) return false;
-  player.punchCooldown = 0.45;
-  audio.punch();
-  const px = player.x;
-  const pz = player.z;
-  let hitAnything = false;
-  for (const thug of combat.thugs) {
-    if (thug.health > 0 && dist2D(px, pz, thug.x, thug.z) < 2.4) {
-      thug.health -= 25;
-      hitAnything = true;
-      if (thug.health <= 0) thug.mesh.visible = false;
+  clearThugs() {
+    for (const thug of this.thugs) this.S.scene.remove(thug.rig.group);
+    this.thugs = [];
+  }
+
+  get liveThugs() {
+    return this.thugs.filter((t) => t.hp > 0);
+  }
+
+  damageThug(thug, amount, fromX, fromZ) {
+    thug.hp -= amount;
+    const d = Math.max(0.001, dist2(thug.x, thug.z, fromX, fromZ));
+    thug.x += ((thug.x - fromX) / d) * 0.7;
+    thug.z += ((thug.z - fromZ) / d) * 0.7;
+    if (thug.hp <= 0) {
+      thug.dead = true;
+      thug.rig.group.rotation.x = -Math.PI / 2;
+      thug.rig.group.position.y = 0.35;
+      this.S.audio.bad();
+      this.S.hud.toast('Thug down.');
+      this.S.missions.onThugDown(thug);
     }
   }
-  for (const ped of peds) {
-    if (dist2D(px, pz, ped.x, ped.z) < 2.2) {
-      ped.scared = 4;
-      ped.targetX = ped.x + (ped.x - px) * 5;
-      ped.targetZ = ped.z + (ped.z - pz) * 5;
-      hitAnything = true;
-      if (onHitPed) onHitPed(ped);
-    }
-  }
-  return hitAnything;
-}
 
-// Fire the pistol from the camera toward the crosshair. Returns the name
-// of what was hit ('thug', 'car', 'building', 'none') for feedback.
-export function tryShoot(player, camera, combat, colliders, cars) {
-  if (player.shootCooldown > 0 || player.ammo <= 0) return 'empty';
-  player.shootCooldown = 0.32;
-  player.ammo -= 1;
-  audio.gunshot();
-  combat.muzzleFlash = 0.08;
-  const ray = new THREE.Raycaster();
-  ray.setFromCamera({ x: 0, y: 0 }, camera);
-  ray.far = 90;
-  const targets = [];
-  for (const thug of combat.thugs) {
-    if (thug.health > 0) targets.push(thug.mesh);
-  }
-  for (const car of cars) targets.push(car.mesh);
-  const hits = ray.intersectObjects(targets, true);
-  if (hits.length) {
-    // Walk up from the hit mesh to the car/thug group that owns it.
-    let node = hits[0].object;
-    while (node.parent && node.parent.type === 'Group') node = node.parent;
-    for (const thug of combat.thugs) {
-      if (thug.mesh === node && thug.health > 0) {
-        thug.health -= 34;
-        thug.state = 'fight';
-        if (thug.health <= 0) thug.mesh.visible = false;
-        return 'thug';
+  update(dt) {
+    const S = this.S;
+    this.shotCooldown = Math.max(0, this.shotCooldown - dt);
+    this.punchCooldown = Math.max(0, this.punchCooldown - dt);
+    if (this.reloading > 0) {
+      this.reloading -= dt;
+      if (this.reloading <= 0) {
+        this.ammo = this.magSize;
+        S.hud.setAmmo(this.ammo, this.magSize, false);
+        S.audio.click();
       }
     }
-    for (const car of cars) {
-      if (car.mesh === node) return 'car';
-    }
-  }
-  return 'none';
-}
-
-// Thugs shoot back when the player is within 26 metres and in the open.
-// Their shots are deliberately inaccurate so a fair fight is winnable.
-export function updateThugs(combat, dt, player, onPlayerShot) {
-  const px = player.car ? player.car.x : player.x;
-  const pz = player.car ? player.car.z : player.z;
-  for (const thug of combat.thugs) {
-    if (thug.health <= 0) continue;
-    const d = dist2D(thug.x, thug.z, px, pz);
-    if (d < 26) {
-      thug.state = 'fight';
-      thug.angle = Math.atan2(px - thug.x, pz - thug.z);
-      thug.mesh.rotation.y = thug.angle;
-      thug.shootTimer -= dt;
-      if (thug.shootTimer <= 0) {
-        thug.shootTimer = rand(0.9, 1.7);
-        audio.gunshot();
-        // One in three shots lands, for 6 damage.
-        if (Math.random() < 0.33 && onPlayerShot) onPlayerShot(6);
+    for (let i = this.tracers.length - 1; i >= 0; i--) {
+      const tr = this.tracers[i];
+      tr.life -= dt;
+      if (tr.life <= 0) {
+        S.scene.remove(tr.line);
+        tr.line.geometry.dispose();
+        this.tracers.splice(i, 1);
       }
-    } else if (thug.state === 'fight') {
-      thug.state = 'guard';
     }
-  }
-}
-
-// Short-lived tracer lines so shots read on screen. Call each frame.
-export function spawnTracer(scene, from, to) {
-  const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(from.x, from.y, from.z),
-    new THREE.Vector3(to.x, to.y, to.z),
-  ]);
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0xffe9a8 }));
-  scene.add(line);
-  return { line, life: 0.09 };
-}
-
-export function updateTracers(combat, dt) {
-  for (let i = combat.tracers.length - 1; i >= 0; i--) {
-    const t = combat.tracers[i];
-    t.life -= dt;
-    if (t.life <= 0) {
-      t.line.parent.remove(t.line);
-      combat.tracers.splice(i, 1);
+    if (!S.started || S.paused || S.over) return;
+    // Thugs stand their ground and shoot at the player when close.
+    const p = S.player;
+    for (const thug of this.thugs) {
+      if (thug.hp <= 0) continue;
+      const d = dist2(thug.x, thug.z, p.x, p.z);
+      thug.heading = Math.atan2(-(p.x - thug.x), -(p.z - thug.z));
+      thug.rig.group.rotation.y = thug.heading;
+      thug.rig.group.position.set(thug.x, 0, thug.z);
+      thug.phase += dt * 4;
+      thug.rig.armR.rotation.x = -0.9 + Math.sin(thug.phase) * 0.08;
+      if (d < 42 && p.onFoot) {
+        thug.shootT -= dt;
+        if (thug.shootT <= 0) {
+          thug.shootT = range(this.rng, 1.1, 2.1);
+          S.audio.shot();
+          this.spawnTracer(
+            new S.THREE.Vector3(thug.x, 1.5, thug.z),
+            new S.THREE.Vector3(p.x + range(this.rng, -2.5, 2.5), 1.2, p.z + range(this.rng, -2.5, 2.5)),
+          );
+          // Thugs are bad shots at range; closer is scarier.
+          if (this.rng() < clamp(0.55 - d * 0.008, 0.08, 0.5)) {
+            p.hurt(6 + Math.floor(this.rng() * 5), thug.x, thug.z);
+            S.hud.flashDamage();
+          }
+        }
+      }
     }
   }
 }
