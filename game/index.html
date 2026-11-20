@@ -23,7 +23,7 @@
   #hud-minimap { width: 168px; height: 168px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
     background: #2c3138; box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
   #hud-wanted-label { font-size: 11px; letter-spacing: 2px; color: #c9c2b8; margin-top: 5px;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
+    text-shadow: 0 1px 4px rgba(0,0,0,0.85); }
   #hud-mission { position: absolute; left: 14px; bottom: 14px; padding: 12px 14px; max-width: 380px; }
   #hud-mission-title { font-size: 16px; font-weight: 800; color: #ffd94d; }
   #hud-mission-brief { font-size: 13px; line-height: 1.45; margin-top: 4px; color: #efe9df; }
@@ -50,7 +50,7 @@
     background: radial-gradient(ellipse at center, transparent 55%, rgba(200, 20, 20, 0.55) 100%);
     transition: opacity 0.15s; }
   .overlay { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center;
-    justify-content: center; background: linear-gradient(160deg, rgba(18,30,48,0.55), rgba(30,50,70,0.45)); }
+    justify-content: center; background: linear-gradient(160deg, rgba(20,12,34,0.55), rgba(60,20,40,0.45)); }
   .card { max-width: 620px; padding: 34px 40px; text-align: center; background: rgba(10, 8, 20, 0.72);
     border: 1px solid rgba(255, 217, 77, 0.35); border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.6); }
   .card h1 { font-size: 52px; letter-spacing: 4px; color: #ffd94d;
@@ -64,59 +64,53 @@
     border: none; border-radius: 10px; box-shadow: 0 4px 0 #b89a2e; }
   .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #b89a2e; }
   .btn.ghost { background: transparent; color: #ffd94d; border: 2px solid #ffd94d; box-shadow: none; }
+  /* Polish panels: dispatch, mechanic readouts, judge note. */
+  #police-dispatch { position: absolute; top: 212px; right: 14px; width: 280px; padding: 10px 12px; }
+  #police-dispatch-header { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; color: #8fd8ff; }
+  .dispatch-row { display: flex; gap: 6px; font-size: 12px; font-weight: 600; margin-top: 6px;
+    align-items: baseline; }
+  .dispatch-unit { color: #fff; min-width: 52px; }
+  .dispatch-dist { color: #ffd94d; min-width: 38px; text-align: right; }
+  .dispatch-speed { color: #b9c4d6; min-width: 56px; text-align: right; }
+  .dispatch-status { margin-left: auto; font-size: 11px; letter-spacing: 0.5px; white-space: nowrap; }
+  .dispatch-status.ramming { color: #ff5a4d; }
+  .dispatch-status.closing { color: #ff9a3d; }
+  .dispatch-status.chasing { color: #ffd94d; }
+  .dispatch-status.searching { color: #8a929c; }
+  #radio-line, #progression-strip, #street-life-strip { position: absolute; left: 14px;
+    padding: 6px 12px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+  #radio-line { top: 150px; color: #ffd94d; }
+  #radio-line .radio-show { color: #efe9df; margin-left: 8px; font-weight: 600; }
+  #progression-strip { top: 184px; color: #8fd8ff; }
+  #street-life-strip { top: 218px; color: #b9c4d6; }
+  #mara-line { position: absolute; top: 252px; left: 14px; max-width: 330px; padding: 8px 12px;
+    font-size: 13px; font-style: italic; line-height: 1.4; color: #ffe9a0; }
+  #mission-stage-bar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    width: 340px; padding: 8px 12px; }
+  #stage-label { font-size: 12px; font-weight: 700; color: #ffd94d; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  #stage-track { height: 6px; margin-top: 6px; background: rgba(255,255,255,0.16); border-radius: 3px;
+    overflow: hidden; }
+  #stage-fill { height: 100%; background: #ffd94d; }
+  #thugs-left { position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%);
+    padding: 6px 12px; font-size: 12px; font-weight: 800; letter-spacing: 1px; color: #ff5a4d; }
+  #vehicle-card { position: absolute; right: 16px; bottom: 172px; width: 230px; padding: 10px 12px; }
+  #vehicle-label { font-size: 13px; font-weight: 800; color: #fff; }
+  #vehicle-top { font-size: 12px; color: #8fd8ff; margin-top: 3px; }
+  #vehicle-bar { height: 8px; margin-top: 7px; background: rgba(255,255,255,0.16); border-radius: 4px;
+    overflow: hidden; }
+  #vehicle-fill { height: 100%; background: #46c25a; }
+  #weapon-slots { position: absolute; right: 16px; bottom: 100px; width: 230px; padding: 8px 12px; }
+  .weapon-row { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700;
+    margin: 2px 0; }
+  .weapon-ammo { color: #ffe9a0; }
+  #judge-note { margin-top: 16px; padding: 10px 14px; background: rgba(255, 217, 77, 0.1);
+    border: 1px solid rgba(255, 217, 77, 0.4); border-radius: 10px; font-size: 13px;
+    line-height: 1.5; text-align: left; color: #f2ede6; }
+  #feature-strip { margin-top: 10px; font-size: 12px; line-height: 1.5; color: #ffd94d; font-weight: 600; }
   #end-title { font-size: 64px; letter-spacing: 8px; color: #ff5a4d; text-shadow: 0 0 30px rgba(255, 60, 40, 0.7); }
   #pause-screen, #end-screen { display: none; }
   #btn-continue { display: none; }
-  /* Mechanic readouts: progression, street life and radio lines under the stars. */
-  #hud-progress, #hud-citylife, #hud-radio { font-size: 11px; font-weight: 700;
-    letter-spacing: 0.5px; color: #b9c4d6; margin-top: 5px; }
-  #hud-radio { color: #8fd8ff; }
-  /* VBPD dispatch panel: every cruiser on the player, live. */
-  #hud-dispatch { position: absolute; top: 178px; left: 14px; padding: 10px 12px; min-width: 252px; }
-  #hud-dispatch-head { font-size: 12px; font-weight: 800; letter-spacing: 1px; color: #ff8f8f; }
-  .dispatch-row { display: flex; justify-content: space-between; gap: 10px;
-    font-size: 12px; font-weight: 700; margin-top: 5px; white-space: nowrap; }
-  .dispatch-unit { color: #fff; }
-  .dispatch-dist { color: #b9c4d6; }
-  .dispatch-status.hot { color: #ff5a4d; }
-  .dispatch-status.warm { color: #ffd94d; }
-  .dispatch-status.cool { color: #8fd8ff; }
-  /* Weapon slots under the minimap. */
-  #hud-weapons { position: absolute; top: 216px; right: 14px; padding: 8px 10px;
-    display: none; gap: 8px; }
-  .weapon-slot { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 86px; }
-  .weapon-slot.reloading { border-color: #ff5a4d; }
-  .weapon-name { display: block; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
-  .weapon-ammo { display: block; font-size: 15px; font-weight: 800; color: #ffe9a0; margin-top: 2px; }
-  /* Stolen-vehicle card above the speed readout. */
-  #hud-vehicle { position: absolute; right: 16px; bottom: 96px; padding: 10px 14px;
-    min-width: 220px; text-align: right; }
-  #hud-vehicle-name { font-size: 16px; font-weight: 800; color: #ffd94d; }
-  #hud-vehicle-sub { font-size: 12px; font-weight: 700; color: #b9c4d6; margin-top: 3px; }
-  #hud-vehicle-bar { height: 6px; background: rgba(255,255,255,0.16); border-radius: 3px;
-    margin-top: 6px; overflow: hidden; }
-  #hud-vehicle-fill { height: 100%; width: 0%; background: #46c25a; }
-  /* Mara, the fixer: reactive dialogue above the control prompt. */
-  #hud-mara { position: absolute; left: 50%; bottom: 148px; transform: translateX(-50%);
-    display: none; align-items: center; gap: 12px; padding: 10px 16px; max-width: 480px; }
-  #hud-mara-avatar { width: 38px; height: 38px; flex: none; border-radius: 50%; background: #ff8f6b;
-    color: #1a1426; font-size: 20px; font-weight: 800; display: flex; align-items: center;
-    justify-content: center; }
-  #hud-mara-name { font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #ff8f6b; }
-  #hud-mara-line { font-size: 14px; font-weight: 600; margin-top: 2px; line-height: 1.35; }
-  /* Mission stage bar + thugs left, inside the mission panel. */
-  .hud-mission-progress { margin-top: 8px; }
-  #hud-mission-stage { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #ffd94d; }
-  #hud-mission-bar { height: 6px; background: rgba(255,255,255,0.16); border-radius: 3px;
-    margin-top: 4px; overflow: hidden; }
-  #hud-mission-fill { height: 100%; width: 0%; background: #ffd94d; }
-  #hud-thugs { font-size: 12px; font-weight: 800; color: #ff8f8f; margin-top: 6px; }
-  /* Start screen: feature strip + note to the judge. */
-  #feature-strip { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; color: #8fd8ff;
-    margin-top: 16px; line-height: 1.6; }
-  #judge-note { font-size: 12px; line-height: 1.55; color: #b9c4d6; margin-top: 12px;
-    text-align: left; border-top: 1px solid rgba(255,255,255,0.14); padding-top: 12px; }
 </style>
 </head>
 <body>
@@ -149,7 +143,7 @@
 <div id="start-screen" class="overlay">
   <div class="card">
     <h1>VELLORA BAY</h1>
-    <h2>A SUN-SOAKED OPEN CITY</h2>
+    <h2>AN OPEN-CITY STORY &nbsp;•&nbsp; A SUN-SOAKED OPEN CITY</h2>
     <p>You washed up in Vellora Bay with $200, a borrowed jacket and a fixer named
     Mara who always has one more job. Steal cars, run packages past the Red Tide
     crew, lose the VBPD, take the turf — and try not to get busted doing it.

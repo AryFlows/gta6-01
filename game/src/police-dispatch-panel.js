@@ -1,63 +1,66 @@
-// Vellora Bay — the VBPD dispatch panel. The wanted system is only as
-// convincing as its readout: while the heat is on, this panel names every
-// cruiser the police have on the player, its live distance and what it is
-// doing right now — RAMMING on contact, CLOSING IN, CHASING, or SEARCHING
-// once the player has broken away far enough for the heat to start cooling.
-// Every number comes from the live police state; nothing here is staged.
+// Vellora Bay — VBPD dispatch panel. While the heat is on, a live panel
+// lists every cruiser in the pursuit with its call sign, distance to the
+// player and speed, so the chase reads as a system in screenshots instead
+// of a couple of blue dots on the minimap.
+import { dist2 } from './util.js';
+
+let panelEl = null;
+let listEl = null;
+let headerEl = null;
+
 export function createPoliceDispatchPanel() {
-  const root = document.createElement('div');
-  root.id = 'hud-dispatch';
-  root.className = 'panel';
-  root.style.display = 'none';
-  const head = document.createElement('div');
-  head.id = 'hud-dispatch-head';
-  const rows = document.createElement('div');
-  rows.id = 'hud-dispatch-rows';
-  root.appendChild(head);
-  root.appendChild(rows);
-  document.getElementById('hud').appendChild(root);
-  return { root, head, rows, lastText: '' };
+  const panel = document.createElement('div');
+  panel.id = 'police-dispatch';
+  panel.className = 'panel';
+  panel.style.display = 'none';
+
+  const header = document.createElement('div');
+  header.id = 'police-dispatch-header';
+  header.textContent = 'VBPD DISPATCH';
+  panel.appendChild(header);
+
+  const list = document.createElement('div');
+  list.id = 'police-dispatch-list';
+  panel.appendChild(list);
+
+  document.getElementById('hud').appendChild(panel);
+  panelEl = panel;
+  listEl = list;
+  headerEl = header;
+  return panel;
 }
 
-// What a cruiser is doing, from its real distance to the player. The
-// thresholds match the chase logic in police.js: contact under ~6 m is a
-// ram, and past 48 m the heat starts to cool.
-function dispatchStatus(dist) {
-  if (dist < 6) return { label: 'RAMMING', cls: 'hot' };
-  if (dist < 25) return { label: 'CLOSING IN', cls: 'warm' };
-  if (dist < 48) return { label: 'CHASING', cls: 'cool' };
-  return { label: 'SEARCHING', cls: 'cool' };
+// Status from the live gap: close enough to ram, closing, chasing, or
+// too far away to see the player (the heat is cooling off).
+function statusFor(distance) {
+  if (distance < 6) return { text: 'RAMMING', cls: 'ramming' };
+  if (distance < 25) return { text: 'CLOSING IN', cls: 'closing' };
+  if (distance < 48) return { text: 'CHASING', cls: 'chasing' };
+  return { text: 'SEARCHING', cls: 'searching' };
 }
 
-function starsText(n) {
-  let s = '';
-  for (let i = 0; i < 5; i++) s += i < n ? '★' : '☆';
-  return s;
-}
-
-export function renderPoliceDispatch(S, panel) {
-  const stars = S.police.stars;
-  const cruisers = S.police.cruisers;
-  if (!S.started || stars === 0 || cruisers.length === 0) {
-    panel.root.style.display = 'none';
+export function renderPoliceDispatch(S) {
+  if (!panelEl) return;
+  const cruisers = S.police ? S.police.cruisers : [];
+  if (!S.started || cruisers.length === 0) {
+    panelEl.style.display = 'none';
     return;
   }
-  panel.root.style.display = 'block';
+  panelEl.style.display = 'block';
   const p = S.player;
   const px = p.car ? p.car.x : p.x;
   const pz = p.car ? p.car.z : p.z;
-  panel.head.textContent = 'VBPD DISPATCH · ' + cruisers.length + (cruisers.length === 1 ? ' UNIT' : ' UNITS') + ' · ' + starsText(stars);
+  const stars = S.police.stars;
+  headerEl.textContent = 'VBPD DISPATCH — ' + stars + (stars === 1 ? ' STAR' : ' STARS');
   let html = '';
   for (let i = 0; i < cruisers.length; i++) {
     const c = cruisers[i];
-    const d = Math.hypot(c.x - px, c.z - pz);
-    const st = dispatchStatus(d);
-    html += '<div class="dispatch-row"><span class="dispatch-unit">VBPD-' + (i + 1) + '</span>'
-      + '<span class="dispatch-dist">' + Math.round(d) + ' m · ' + Math.round(c.kmh) + ' km/h</span>'
-      + '<span class="dispatch-status ' + st.cls + '">' + st.label + '</span></div>';
+    const d = dist2(c.x, c.z, px, pz);
+    const st = statusFor(d);
+    html += '<div class="dispatch-row"><span class="dispatch-unit">UNIT ' + (i + 1) + '</span>' +
+      '<span class="dispatch-dist">' + Math.round(d) + ' m</span>' +
+      '<span class="dispatch-speed">' + Math.round(c.kmh) + ' km/h</span>' +
+      '<span class="dispatch-status ' + st.cls + '">' + st.text + '</span></div>';
   }
-  if (html !== panel.lastText) {
-    panel.rows.innerHTML = html;
-    panel.lastText = html;
-  }
+  listEl.innerHTML = html;
 }

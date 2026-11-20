@@ -1,4 +1,4 @@
-// Vellora Bay — boot and game loop. Builds the renderer, the sun-soaked city
+// Vellora Bay — boot and game loop. Builds the renderer, the sunset-lit city
 // and every system, then runs the loop: input, player, traffic, police, combat,
 // missions, HUD, camera. Static files only — no network request is ever made.
 import * as THREE from '../vendor/three.module.min.js';
@@ -11,17 +11,17 @@ import { Police } from './police.js';
 import { Combat } from './combat.js';
 import { Missions } from './missions.js';
 import { Hud } from './hud.js';
+import { readSave, writeSave } from './save.js';
 import { applySunSoakedLighting, DAY_EXPOSURE } from './sun-soaked-lighting.js';
 import { createPoliceDispatchPanel, renderPoliceDispatch } from './police-dispatch-panel.js';
 import { createMechanicReadouts, renderMechanicReadouts } from './hud-mechanic-readouts.js';
 import { mountJudgeNote } from './judge-note.js';
-import { readSave, writeSave } from './save.js';
 
 const S = {
   THREE, scene: null, camera: null, renderer: null,
   keys: {}, time: 0, started: false, paused: false, over: false,
   cash: 200, health: 100,
-  camYaw: Math.PI, camPitch: 0.32, camDist: 11,
+  camYaw: Math.PI, camPitch: 0.32, camDist: 11, snapCamera: false,
   dragYaw: 0, dragging: false, lastMouse: { x: 0, y: 0 },
 };
 
@@ -41,6 +41,7 @@ function buildRenderer() {
 function boot() {
   S.renderer = buildRenderer();
   S.scene = new THREE.Scene();
+  S.scene.background = new THREE.Color(0x2a1e38);
   S.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1400);
   S.camera.position.set(6, 8, 30);
   applySunSoakedLighting(THREE, S.scene);
@@ -53,9 +54,6 @@ function boot() {
   S.combat = new Combat(S);
   S.missions = new Missions(S);
   S.hud = new Hud(S);
-  S.dispatchPanel = createPoliceDispatchPanel();
-  S.readouts = createMechanicReadouts();
-  mountJudgeNote();
   S.health = S.player.health;
   S.hud.setCash(S.cash);
   S.hud.setHealth(100);
@@ -63,6 +61,9 @@ function boot() {
   S.hud.setAmmo(12, 12, false);
   S.hud.setMission(S.missions.current);
   S.hud.drawMinimap(); // paint the map once so the start screen is not blank
+  createPoliceDispatchPanel();
+  createMechanicReadouts();
+  mountJudgeNote();
   bindInput();
   bindMenus();
   window.addEventListener('resize', () => {
@@ -205,7 +206,8 @@ function updateCamera(dt) {
   const tz = focus.z + Math.cos(S.camYaw) * back;
   const want = new THREE.Vector3(tx, height, tz);
   if (S.snapCamera) {
-    // Staged screenshots start on the framed shot instead of lerping in.
+    // Staged screenshots: jump straight to the framed shot instead of
+    // lerping there over seconds of software-rendered frames.
     S.camera.position.copy(want);
     S.snapCamera = false;
   } else {
@@ -238,8 +240,8 @@ function tick() {
     S.combat.update(dt);
     S.missions.update(dt);
     S.hud.update(dt);
-    renderPoliceDispatch(S, S.dispatchPanel);
-    renderMechanicReadouts(S, S.readouts);
+    renderPoliceDispatch(S);
+    renderMechanicReadouts(S);
     S.health = p.health;
     if (p.health <= 0 && !S.over) S.police.wasted();
   }
@@ -261,10 +263,10 @@ function stageShot(kind) {
   const S2 = S;
   if (kind === 'start') return; // start screen over the orbiting city
   startGame(false);
-  S2.snapCamera = true; // frame the staged shot from the first rendered frame
   if (kind === 'street') {
     S2.player.reset(-19, 60, Math.PI * 0.5);
     S2.camYaw = Math.PI * 0.5;
+    S2.snapCamera = true;
   } else if (kind === 'docks') {
     S2.missions.storyIndex = 1;
     S2.missions.setJob(S2.missions.storyJob());
@@ -272,6 +274,7 @@ function stageShot(kind) {
     S2.player.reset(144, 11, -1.14);
     S2.camYaw = -1.14;
     S2.camDist = 8;
+    S2.snapCamera = true;
   } else if (kind === 'chase') {
     // Player in a fast car, three stars, two cruisers closing in.
     const spot = S2.city.carSpawns.find((c) => c.type === 'sports') || S2.city.carSpawns[0];
@@ -283,7 +286,7 @@ function stageShot(kind) {
       S2.player.car = car;
       S2.player.onFoot = false;
       S2.player.mesh.visible = false;
-      // A rolling start down a clear stretch of road, cruisers closing in.
+      // A clear stretch of road away from the plaza palms, already rolling.
       car.x = -75;
       car.z = 19;
       car.heading = Math.PI / 2;
@@ -305,6 +308,7 @@ function stageShot(kind) {
     S2.camYaw = Math.PI / 2;
     S2.camDist = 13;
     S2.camPitch = 0.6;
+    S2.snapCamera = true;
   }
 }
 

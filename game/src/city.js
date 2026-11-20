@@ -5,10 +5,8 @@
 // on every load. No building ever sits on a road.
 import { makeRng, pick, range, rangeInt, chance, paintTexture, clamp } from './util.js';
 import {
-  makeDaySkyTexture, DAYLIGHT_FACADE_PALETTES, DAY_GROUND_COLOR,
-  DAY_SIDEWALK_COLORS, DAY_PLAZA_COLOR, DAY_WINDOW_DARK,
-  DAY_WINDOW_LIT_RATIO, DAY_SUN_SPRITE, DAY_SUN_GLOW_INNER,
-  DAY_SUN_GLOW_OUTER,
+  makeDaySkyTexture, DAYLIGHT_FACADE_PALETTES, DAY_WINDOW_DARK, DAY_WINDOW_LIT_RATIO,
+  DAY_GROUND_COLOR, DAY_SIDEWALK_COLORS, DAY_PLAZA_COLOR,
 } from './sun-soaked-lighting.js';
 
 export const PITCH = 38; // block (26) + road (12)
@@ -29,7 +27,7 @@ function facadeTexture(THREE, rng, base, litRatio) {
       const x = rng() * w;
       g.fillRect(x, 0, 2 + rng() * 5, h);
     }
-    // Window grid; most panes reflect the pale sky, a few glow warm.
+    // Window grid; a few windows glow against the daylight.
     const cols = 5;
     const rows = 9;
     for (let r = 0; r < rows; r++) {
@@ -83,16 +81,16 @@ export function buildCity(THREE) {
     return m;
   };
 
-  // --- Sky dome + high noon sun -------------------------------------------
+  // --- Sky dome + high midday sun ---------------------------------------
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(640, 24, 14),
     new THREE.MeshBasicMaterial({ map: makeDaySkyTexture(THREE), side: THREE.BackSide, fog: false }),
   );
   group.add(sky);
-  const sunTex = glowTexture(THREE, DAY_SUN_GLOW_INNER, DAY_SUN_GLOW_OUTER);
+  const sunTex = glowTexture(THREE, 'rgba(255,252,235,1)', 'rgba(255,240,170,0)');
   const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, transparent: true, fog: false, depthWrite: false }));
-  sun.position.set(DAY_SUN_SPRITE.x, DAY_SUN_SPRITE.y, DAY_SUN_SPRITE.z);
-  sun.scale.set(DAY_SUN_SPRITE.scale, DAY_SUN_SPRITE.scale, 1);
+  sun.position.set(220, 400, 150);
+  sun.scale.set(260, 260, 1);
   group.add(sun);
   animated.sunSprite = sun;
 
