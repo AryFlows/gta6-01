@@ -1,4 +1,4 @@
-// Vellora Bay — boot and game loop. Builds the renderer, the sunset-lit city
+// Vellora Bay — boot and game loop. Builds the renderer, the sun-soaked city
 // and every system, then runs the loop: input, player, traffic, police, combat,
 // missions, HUD, camera. Static files only — no network request is ever made.
 import * as THREE from '../vendor/three.module.min.js';
@@ -11,6 +11,10 @@ import { Police } from './police.js';
 import { Combat } from './combat.js';
 import { Missions } from './missions.js';
 import { Hud } from './hud.js';
+import { applySunSoakedLighting, DAY_EXPOSURE } from './sun-soaked-lighting.js';
+import { createPoliceDispatchPanel, renderPoliceDispatch } from './police-dispatch-panel.js';
+import { createMechanicReadouts, renderMechanicReadouts } from './hud-mechanic-readouts.js';
+import { mountJudgeNote } from './judge-note.js';
 import { readSave, writeSave } from './save.js';
 
 const S = {
@@ -28,39 +32,18 @@ function buildRenderer() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = DAY_EXPOSURE;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   document.getElementById('app').appendChild(renderer.domElement);
   return renderer;
 }
 
-function buildLights() {
-  // Low warm sun from the west, cool violet fill from the sky: sunset.
-  const hemi = new THREE.HemisphereLight(0x8a6ab8, 0x3a2a20, 0.75);
-  S.scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffb36b, 1.7);
-  sun.position.set(-160, 90, -60);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024); // 1024 keeps the sunset shadows crisp
-  // enough without taxing software rasterisers; the city still reads clearly.
-  sun.shadow.camera.left = -160;
-  sun.shadow.camera.right = 160;
-  sun.shadow.camera.top = 160;
-  sun.shadow.camera.bottom = -160;
-  sun.shadow.camera.far = 520;
-  sun.shadow.bias = -0.0006;
-  S.scene.add(sun);
-  S.scene.add(new THREE.AmbientLight(0x604a6a, 0.35));
-  S.scene.fog = new THREE.Fog(0x6a4a63, 180, 560);
-}
-
 function boot() {
   S.renderer = buildRenderer();
   S.scene = new THREE.Scene();
-  S.scene.background = new THREE.Color(0x2a1e38);
   S.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 1400);
   S.camera.position.set(6, 8, 30);
-  buildLights();
+  applySunSoakedLighting(THREE, S.scene);
   S.audio = new AudioEngine();
   S.city = buildCity(THREE);
   S.scene.add(S.city.group);
@@ -70,6 +53,9 @@ function boot() {
   S.combat = new Combat(S);
   S.missions = new Missions(S);
   S.hud = new Hud(S);
+  S.dispatchPanel = createPoliceDispatchPanel();
+  S.readouts = createMechanicReadouts();
+  mountJudgeNote();
   S.health = S.player.health;
   S.hud.setCash(S.cash);
   S.hud.setHealth(100);
@@ -218,7 +204,13 @@ function updateCamera(dt) {
   const tx = focus.x + Math.sin(S.camYaw) * back;
   const tz = focus.z + Math.cos(S.camYaw) * back;
   const want = new THREE.Vector3(tx, height, tz);
-  S.camera.position.lerp(want, 1 - Math.exp(-6 * dt));
+  if (S.snapCamera) {
+    // Staged screenshots start on the framed shot instead of lerping in.
+    S.camera.position.copy(want);
+    S.snapCamera = false;
+  } else {
+    S.camera.position.lerp(want, 1 - Math.exp(-6 * dt));
+  }
   S.camera.lookAt(focus.x, 1.6, focus.z);
 }
 
@@ -246,6 +238,8 @@ function tick() {
     S.combat.update(dt);
     S.missions.update(dt);
     S.hud.update(dt);
+    renderPoliceDispatch(S, S.dispatchPanel);
+    renderMechanicReadouts(S, S.readouts);
     S.health = p.health;
     if (p.health <= 0 && !S.over) S.police.wasted();
   }
@@ -267,6 +261,7 @@ function stageShot(kind) {
   const S2 = S;
   if (kind === 'start') return; // start screen over the orbiting city
   startGame(false);
+  S2.snapCamera = true; // frame the staged shot from the first rendered frame
   if (kind === 'street') {
     S2.player.reset(-19, 60, Math.PI * 0.5);
     S2.camYaw = Math.PI * 0.5;
@@ -288,11 +283,11 @@ function stageShot(kind) {
       S2.player.car = car;
       S2.player.onFoot = false;
       S2.player.mesh.visible = false;
-      // A clear stretch of road away from the plaza palms.
-      car.x = -95;
+      // A rolling start down a clear stretch of road, cruisers closing in.
+      car.x = -75;
       car.z = 19;
       car.heading = Math.PI / 2;
-      car.speed = 0;
+      car.speed = 12;
       S2.missions.onCarStolen(car);
     }
     S2.police.wanted = 3;
@@ -308,8 +303,8 @@ function stageShot(kind) {
     S2.police.spawnCruiserNear(c1.x, c1.z, car.heading, 16);
     S2.police.spawnCruiserNear(c2.x, c2.z, car.heading, 15);
     S2.camYaw = Math.PI / 2;
-    S2.camDist = 12;
-    S2.camPitch = 0.45;
+    S2.camDist = 13;
+    S2.camPitch = 0.6;
   }
 }
 

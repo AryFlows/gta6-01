@@ -4,16 +4,19 @@
 // canvas textures and plain geometry; the layout is seeded so it is identical
 // on every load. No building ever sits on a road.
 import { makeRng, pick, range, rangeInt, chance, paintTexture, clamp } from './util.js';
+import {
+  makeDaySkyTexture, DAYLIGHT_FACADE_PALETTES, DAY_GROUND_COLOR,
+  DAY_SIDEWALK_COLORS, DAY_PLAZA_COLOR, DAY_WINDOW_DARK,
+  DAY_WINDOW_LIT_RATIO, DAY_SUN_SPRITE, DAY_SUN_GLOW_INNER,
+  DAY_SUN_GLOW_OUTER,
+} from './sun-soaked-lighting.js';
 
 export const PITCH = 38; // block (26) + road (12)
 export const GRID_HALF = 3;
 export const ROAD_LINES = [-133, -95, -57, -19, 19, 57, 95, 133];
 export const CITY_BOUND = 150;
 
-const PALETTES = [
-  ['#8a7a68', '#6f7d8c', '#a08a6a', '#7d8a7a', '#94816e'],
-  ['#5d6b7a', '#7a6a72', '#8c7a5d', '#66755e', '#74655a'],
-];
+const PALETTES = DAYLIGHT_FACADE_PALETTES;
 const NEON_WORDS = ['BAR', 'HOTEL', 'TACOS', '24H', 'PIER', 'CLUB', 'CAFE', 'NEON'];
 
 function facadeTexture(THREE, rng, base, litRatio) {
@@ -26,13 +29,13 @@ function facadeTexture(THREE, rng, base, litRatio) {
       const x = rng() * w;
       g.fillRect(x, 0, 2 + rng() * 5, h);
     }
-    // Window grid; some windows glow warm against the sunset.
+    // Window grid; most panes reflect the pale sky, a few glow warm.
     const cols = 5;
     const rows = 9;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const lit = rng() < litRatio;
-        g.fillStyle = lit ? (rng() < 0.7 ? '#ffd489' : '#9fd8ff') : '#232a33';
+        g.fillStyle = lit ? (rng() < 0.7 ? '#ffd489' : '#9fd8ff') : DAY_WINDOW_DARK;
         const x = 8 + c * 23;
         const y = 10 + r * 26;
         g.fillRect(x, y, 15, 17);
@@ -53,19 +56,6 @@ function dashTexture(THREE) {
     g.clearRect(0, 0, w, h);
     g.fillStyle = '#d8c25a';
     g.fillRect(4, h / 2 - 2, 34, 4);
-  });
-}
-
-function skyTexture(THREE) {
-  return paintTexture(THREE, 16, 512, (g, w, h) => {
-    const grad = g.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0.0, '#141c3a');
-    grad.addColorStop(0.42, '#4a3566');
-    grad.addColorStop(0.62, '#b45a6e');
-    grad.addColorStop(0.78, '#ff8f4d');
-    grad.addColorStop(1.0, '#ffc46b');
-    g.fillStyle = grad;
-    g.fillRect(0, 0, w, h);
   });
 }
 
@@ -93,21 +83,21 @@ export function buildCity(THREE) {
     return m;
   };
 
-  // --- Sky dome + low sun -----------------------------------------------
+  // --- Sky dome + high noon sun -------------------------------------------
   const sky = new THREE.Mesh(
     new THREE.SphereGeometry(640, 24, 14),
-    new THREE.MeshBasicMaterial({ map: skyTexture(THREE), side: THREE.BackSide, fog: false }),
+    new THREE.MeshBasicMaterial({ map: makeDaySkyTexture(THREE), side: THREE.BackSide, fog: false }),
   );
   group.add(sky);
-  const sunTex = glowTexture(THREE, 'rgba(255,236,180,1)', 'rgba(255,140,60,0)');
+  const sunTex = glowTexture(THREE, DAY_SUN_GLOW_INNER, DAY_SUN_GLOW_OUTER);
   const sun = new THREE.Sprite(new THREE.SpriteMaterial({ map: sunTex, transparent: true, fog: false, depthWrite: false }));
-  sun.position.set(-420, 95, -260);
-  sun.scale.set(260, 260, 1);
+  sun.position.set(DAY_SUN_SPRITE.x, DAY_SUN_SPRITE.y, DAY_SUN_SPRITE.z);
+  sun.scale.set(DAY_SUN_SPRITE.scale, DAY_SUN_SPRITE.scale, 1);
   group.add(sun);
   animated.sunSprite = sun;
 
   // --- Ground, roads, sidewalks -----------------------------------------
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(760, 760), mat('#33373c'));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(760, 760), mat(DAY_GROUND_COLOR));
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, -0.05, 90);
   ground.receiveShadow = true;
@@ -142,7 +132,7 @@ export function buildCity(THREE) {
   // Sidewalk slabs + buildings, one block at a time.
   const facadeCache = {};
   const facadeFor = (base) => {
-    if (!facadeCache[base]) facadeCache[base] = facadeTexture(THREE, makeRng(base.length * 977 + base.charCodeAt(1)), base, 0.42);
+    if (!facadeCache[base]) facadeCache[base] = facadeTexture(THREE, makeRng(base.length * 977 + base.charCodeAt(1)), base, DAY_WINDOW_LIT_RATIO);
     return facadeCache[base];
   };
 
@@ -153,7 +143,7 @@ export function buildCity(THREE) {
       if (bx === PLAZA_BLOCK.x && bz === PLAZA_BLOCK.z) continue;
       if (bx === PARK_BLOCK.x && bz === PARK_BLOCK.z) continue;
       // Sidewalk slab.
-      const slab = box(26.6, 0.5, 26.6, mat(pick(rng, ['#5f6366', '#676b66', '#5b6063'])));
+      const slab = box(26.6, 0.5, 26.6, mat(pick(rng, DAY_SIDEWALK_COLORS)));
       slab.position.set(cx, 0.2, cz);
       slab.castShadow = false;
       group.add(slab);
@@ -224,7 +214,7 @@ export function buildCity(THREE) {
   }
 
   // --- Plaza: round pavement, fountain, benches --------------------------
-  const plazaDisc = new THREE.Mesh(new THREE.CylinderGeometry(13, 13, 0.5, 28), mat('#7d7468'));
+  const plazaDisc = new THREE.Mesh(new THREE.CylinderGeometry(13, 13, 0.5, 28), mat(DAY_PLAZA_COLOR));
   plazaDisc.position.set(0, 0.2, 0);
   plazaDisc.receiveShadow = true;
   group.add(plazaDisc);

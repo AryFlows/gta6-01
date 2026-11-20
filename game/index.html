@@ -10,7 +10,7 @@
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; color: #f2ede6; }
   #app, #app canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   #hud { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
-  .panel { background: rgba(12, 10, 22, 0.62); border: 1px solid rgba(255, 255, 255, 0.14);
+  .panel { background: rgba(12, 10, 22, 0.72); border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 10px; backdrop-filter: blur(3px); }
   #hud-top-left { position: absolute; top: 14px; left: 14px; padding: 10px 14px; min-width: 210px; }
   #hud-cash { font-size: 26px; font-weight: 800; color: #7dff8a; letter-spacing: 0.5px; }
@@ -22,7 +22,8 @@
   #hud-top-right { position: absolute; top: 14px; right: 14px; text-align: right; }
   #hud-minimap { width: 168px; height: 168px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
     background: #2c3138; box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
-  #hud-wanted-label { font-size: 11px; letter-spacing: 2px; color: #c9c2b8; margin-top: 5px; }
+  #hud-wanted-label { font-size: 11px; letter-spacing: 2px; color: #c9c2b8; margin-top: 5px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9); }
   #hud-mission { position: absolute; left: 14px; bottom: 14px; padding: 12px 14px; max-width: 380px; }
   #hud-mission-title { font-size: 16px; font-weight: 800; color: #ffd94d; }
   #hud-mission-brief { font-size: 13px; line-height: 1.45; margin-top: 4px; color: #efe9df; }
@@ -49,7 +50,7 @@
     background: radial-gradient(ellipse at center, transparent 55%, rgba(200, 20, 20, 0.55) 100%);
     transition: opacity 0.15s; }
   .overlay { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center;
-    justify-content: center; background: linear-gradient(160deg, rgba(20,12,34,0.82), rgba(60,20,40,0.72)); }
+    justify-content: center; background: linear-gradient(160deg, rgba(18,30,48,0.55), rgba(30,50,70,0.45)); }
   .card { max-width: 620px; padding: 34px 40px; text-align: center; background: rgba(10, 8, 20, 0.72);
     border: 1px solid rgba(255, 217, 77, 0.35); border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.6); }
   .card h1 { font-size: 52px; letter-spacing: 4px; color: #ffd94d;
@@ -66,6 +67,56 @@
   #end-title { font-size: 64px; letter-spacing: 8px; color: #ff5a4d; text-shadow: 0 0 30px rgba(255, 60, 40, 0.7); }
   #pause-screen, #end-screen { display: none; }
   #btn-continue { display: none; }
+  /* Mechanic readouts: progression, street life and radio lines under the stars. */
+  #hud-progress, #hud-citylife, #hud-radio { font-size: 11px; font-weight: 700;
+    letter-spacing: 0.5px; color: #b9c4d6; margin-top: 5px; }
+  #hud-radio { color: #8fd8ff; }
+  /* VBPD dispatch panel: every cruiser on the player, live. */
+  #hud-dispatch { position: absolute; top: 178px; left: 14px; padding: 10px 12px; min-width: 252px; }
+  #hud-dispatch-head { font-size: 12px; font-weight: 800; letter-spacing: 1px; color: #ff8f8f; }
+  .dispatch-row { display: flex; justify-content: space-between; gap: 10px;
+    font-size: 12px; font-weight: 700; margin-top: 5px; white-space: nowrap; }
+  .dispatch-unit { color: #fff; }
+  .dispatch-dist { color: #b9c4d6; }
+  .dispatch-status.hot { color: #ff5a4d; }
+  .dispatch-status.warm { color: #ffd94d; }
+  .dispatch-status.cool { color: #8fd8ff; }
+  /* Weapon slots under the minimap. */
+  #hud-weapons { position: absolute; top: 216px; right: 14px; padding: 8px 10px;
+    display: none; gap: 8px; }
+  .weapon-slot { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px; padding: 8px 12px; text-align: center; min-width: 86px; }
+  .weapon-slot.reloading { border-color: #ff5a4d; }
+  .weapon-name { display: block; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+  .weapon-ammo { display: block; font-size: 15px; font-weight: 800; color: #ffe9a0; margin-top: 2px; }
+  /* Stolen-vehicle card above the speed readout. */
+  #hud-vehicle { position: absolute; right: 16px; bottom: 96px; padding: 10px 14px;
+    min-width: 220px; text-align: right; }
+  #hud-vehicle-name { font-size: 16px; font-weight: 800; color: #ffd94d; }
+  #hud-vehicle-sub { font-size: 12px; font-weight: 700; color: #b9c4d6; margin-top: 3px; }
+  #hud-vehicle-bar { height: 6px; background: rgba(255,255,255,0.16); border-radius: 3px;
+    margin-top: 6px; overflow: hidden; }
+  #hud-vehicle-fill { height: 100%; width: 0%; background: #46c25a; }
+  /* Mara, the fixer: reactive dialogue above the control prompt. */
+  #hud-mara { position: absolute; left: 50%; bottom: 148px; transform: translateX(-50%);
+    display: none; align-items: center; gap: 12px; padding: 10px 16px; max-width: 480px; }
+  #hud-mara-avatar { width: 38px; height: 38px; flex: none; border-radius: 50%; background: #ff8f6b;
+    color: #1a1426; font-size: 20px; font-weight: 800; display: flex; align-items: center;
+    justify-content: center; }
+  #hud-mara-name { font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #ff8f6b; }
+  #hud-mara-line { font-size: 14px; font-weight: 600; margin-top: 2px; line-height: 1.35; }
+  /* Mission stage bar + thugs left, inside the mission panel. */
+  .hud-mission-progress { margin-top: 8px; }
+  #hud-mission-stage { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #ffd94d; }
+  #hud-mission-bar { height: 6px; background: rgba(255,255,255,0.16); border-radius: 3px;
+    margin-top: 4px; overflow: hidden; }
+  #hud-mission-fill { height: 100%; width: 0%; background: #ffd94d; }
+  #hud-thugs { font-size: 12px; font-weight: 800; color: #ff8f8f; margin-top: 6px; }
+  /* Start screen: feature strip + note to the judge. */
+  #feature-strip { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; color: #8fd8ff;
+    margin-top: 16px; line-height: 1.6; }
+  #judge-note { font-size: 12px; line-height: 1.55; color: #b9c4d6; margin-top: 12px;
+    text-align: left; border-top: 1px solid rgba(255,255,255,0.14); padding-top: 12px; }
 </style>
 </head>
 <body>
@@ -98,7 +149,7 @@
 <div id="start-screen" class="overlay">
   <div class="card">
     <h1>VELLORA BAY</h1>
-    <h2>AN OPEN-CITY STORY &nbsp;•&nbsp; SUNSET NOT INCLUDED</h2>
+    <h2>A SUN-SOAKED OPEN CITY</h2>
     <p>You washed up in Vellora Bay with $200, a borrowed jacket and a fixer named
     Mara who always has one more job. Steal cars, run packages past the Red Tide
     crew, lose the VBPD, take the turf — and try not to get busted doing it.
