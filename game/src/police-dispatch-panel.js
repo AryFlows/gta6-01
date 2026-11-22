@@ -62,5 +62,10 @@ export function renderPoliceDispatch(S) {
       '<span class="dispatch-speed">' + Math.round(c.kmh) + ' km/h</span>' +
       '<span class="dispatch-status ' + st.cls + '">' + st.text + '</span></div>';
   }
+  if (S.helicopter && S.helicopter.active) {
+    const hp = S.player.car || S.player;
+    const heliGround = Math.round(Math.hypot(S.helicopter.x - hp.x, S.helicopter.z - hp.z));
+    html += '<div class="dispatch-row"><span class="dispatch-unit">AIR-1</span><span class="dispatch-dist">' + Math.round(S.helicopter.altitude) + 'm/' + heliGround + 'm</span><span class="dispatch-speed">—</span><span class="dispatch-status chasing">TRACKING</span></div>';
+  }
   listEl.innerHTML = html;
 }

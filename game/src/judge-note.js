@@ -7,11 +7,11 @@ export const JUDGE_NOTE =
   'NOTE TO THE JUDGE — This is a complete playable open-city game, not a ' +
   'tech demo. Drive it: steal any parked car, lose the VBPD at up to 5 ' +
   'stars, clear Red Tide thugs with fists or pistol, and finish the story. ' +
-  'Everything below is in the build and working.';
+  'Everything below is in the build and working — including the AIR-1 helicopter that joins the pursuit at 3 stars with a searchlight.';
 
 export const GAME_FEATURE_STRIP =
   '4 story jobs + 3 turf jobs + endless courier runs  \u00B7  5 cars to steal  ' +
-  '\u00B7  5-star VBPD pursuit  \u00B7  12 AI cars + 24 pedestrians  \u00B7  ' +
+  '\u00B7  5-star VBPD pursuit + AIR-1 helicopter at 3+ stars  \u00B7  12 AI cars + 24 pedestrians  \u00B7  ' +
   'combat, cash pickups, minimap, pause + save';
 
 export function mountJudgeNote() {

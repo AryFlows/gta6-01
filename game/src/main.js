@@ -8,6 +8,7 @@ import { buildCity, animateCity } from './city.js';
 import { Player } from './player.js';
 import { Traffic } from './traffic.js';
 import { Police } from './police.js';
+import { Helicopter } from './helicopter.js';
 import { Combat } from './combat.js';
 import { Missions } from './missions.js';
 import { Hud } from './hud.js';
@@ -51,6 +52,7 @@ function boot() {
   S.player = new Player(S);
   S.traffic = new Traffic(S);
   S.police = new Police(S);
+  S.helicopter = new Helicopter(S);
   S.combat = new Combat(S);
   S.missions = new Missions(S);
   S.hud = new Hud(S);
@@ -140,6 +142,7 @@ function bindMenus() {
     S.player.health = 100;
     S.player.reset(6, 14, Math.PI);
     S.police.clearHeat(true);
+    S.helicopter.clear();
     S.combat.clearThugs();
     S.combat.ammo = 12;
     S.missions.storyIndex = 0;
@@ -237,6 +240,7 @@ function tick() {
     }
     S.traffic.update(dt);
     S.police.update(dt);
+  S.helicopter.update(dt);
     S.combat.update(dt);
     S.missions.update(dt);
     S.hud.update(dt);
@@ -306,6 +310,7 @@ function stageShot(kind) {
     S2.police.spawnCruiserNear(c1.x, c1.z, car.heading, 16);
     S2.police.spawnCruiserNear(c2.x, c2.z, car.heading, 15);
     S2.camYaw = Math.PI / 2;
+    if (S2.player.car) S2.helicopter.stage(S2.player.car.x - 25, S2.player.car.z, 8);
     S2.camDist = 13;
     S2.camPitch = 0.6;
     S2.snapCamera = true;
