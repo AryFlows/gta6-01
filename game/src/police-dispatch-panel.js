@@ -53,11 +53,13 @@ export function renderPoliceDispatch(S) {
   const stars = S.police.stars;
   headerEl.textContent = 'VBPD DISPATCH — ' + stars + (stars === 1 ? ' STAR' : ' STARS');
   let html = '';
+  let bw = 0;
   for (let i = 0; i < cruisers.length; i++) {
     const c = cruisers[i];
     const d = dist2(c.x, c.z, px, pz);
-    const st = statusFor(d);
-    html += '<div class="dispatch-row"><span class="dispatch-unit">UNIT ' + (i + 1) + '</span>' +
+    const st = c.blockade ? { text: 'ROADBLOCK', cls: 'roadblock' } : statusFor(d);
+    const unit = c.blockade ? 'BULWARK ' + (++bw) : 'UNIT ' + (i + 1);
+    html += '<div class="dispatch-row"><span class="dispatch-unit">' + unit + '</span>' +
       '<span class="dispatch-dist">' + Math.round(d) + ' m</span>' +
       '<span class="dispatch-speed">' + Math.round(c.kmh) + ' km/h</span>' +
       '<span class="dispatch-status ' + st.cls + '">' + st.text + '</span></div>';

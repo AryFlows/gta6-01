@@ -3,6 +3,11 @@
 // missions, HUD, camera. Static files only — no network request is ever made.
 import * as THREE from '../vendor/three.module.min.js';
 import { clamp, damp, angleDamp } from './util.js';
+import { RespectRanks } from './respect-ranks.js';
+import { WeaponWheel } from './weapon-wheel.js';
+import { Roadblocks } from './police-roadblocks.js';
+import { CrewAbilities } from './crew-abilities.js';
+import { mountJudgeNote } from './judge-note.js';
 import { AudioEngine } from './audio.js';
 import { buildCity, animateCity } from './city.js';
 import { Player } from './player.js';
@@ -16,7 +21,6 @@ import { readSave, writeSave } from './save.js';
 import { applySunSoakedLighting, DAY_EXPOSURE } from './sun-soaked-lighting.js';
 import { createPoliceDispatchPanel, renderPoliceDispatch } from './police-dispatch-panel.js';
 import { createMechanicReadouts, renderMechanicReadouts } from './hud-mechanic-readouts.js';
-import { mountJudgeNote } from './judge-note.js';
 
 const S = {
   THREE, scene: null, camera: null, renderer: null,
@@ -56,6 +60,10 @@ function boot() {
   S.combat = new Combat(S);
   S.missions = new Missions(S);
   S.hud = new Hud(S);
+  S.respect = new RespectRanks(S);
+  S.weapons = new WeaponWheel(S);
+  S.roadblocks = new Roadblocks(S);
+  S.crew = new CrewAbilities(S);
   S.health = S.player.health;
   S.hud.setCash(S.cash);
   S.hud.setHealth(100);
@@ -246,6 +254,10 @@ function tick() {
     S.hud.update(dt);
     renderPoliceDispatch(S);
     renderMechanicReadouts(S);
+    S.respect.update(dt);
+    S.weapons.update(dt);
+    S.roadblocks.update(dt);
+    S.crew.update(dt);
     S.health = p.health;
     if (p.health <= 0 && !S.over) S.police.wasted();
   }
@@ -299,21 +311,27 @@ function stageShot(kind) {
     }
     S2.police.wanted = 3;
     S2.hud.setStars(3);
-    // Two cruisers close behind the player car, inside the camera frame.
-    const behind = (dist, lane) => {
-      const fx = -Math.sin(car.heading);
-      const fz = -Math.cos(car.heading);
-      return { x: car.x - fx * dist + (-fz) * lane, z: car.z - fz * dist + fx * lane };
-    };
-    const c1 = behind(8, -2.5);
-    const c2 = behind(13, 2.5);
-    S2.police.spawnCruiserNear(c1.x, c1.z, car.heading, 16);
-    S2.police.spawnCruiserNear(c2.x, c2.z, car.heading, 15);
+    // Cruisers flanking the player car, in the camera frame: one ahead-left
+    // closing in, one alongside right. (Behind the car is behind the camera.)
+    const fx = -Math.sin(car.heading);
+    const fz = -Math.cos(car.heading);
+    const flank = (ahead, lane) => ({
+      x: car.x + fx * ahead - fz * lane,
+      z: car.z + fz * ahead + fx * lane,
+    });
+    const f1 = flank(14, -3.5);
+    const f2 = flank(2, 4);
+    S2.police.spawnCruiserNear(f1.x, f1.z, car.heading, 17);
+    S2.police.spawnCruiserNear(f2.x, f2.z, car.heading, 16);
+    // A roadblock across the road ahead, in frame past the flanking cruisers.
+    S2.roadblocks.stage(car.x + fx * 40, car.z + fz * 40, car.heading);
     S2.camYaw = Math.PI / 2;
-    if (S2.player.car) S2.helicopter.stage(S2.player.car.x - 25, S2.player.car.z, 8);
+    if (S2.player.car) S2.helicopter.stage(S2.player.car.x - 8, S2.player.car.z + 16, 10);
     S2.camDist = 13;
-    S2.camPitch = 0.6;
+    S2.camPitch = 0.5;
     S2.snapCamera = true;
+    // The job-1 banner would cover the pursuit; the docks shot shows it.
+    if (S2.missions.bannerEl) S2.missions.bannerEl.style.display = 'none';
   }
 }
 

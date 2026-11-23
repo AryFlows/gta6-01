@@ -93,11 +93,14 @@ export class Police {
     const p = S.player;
     const px = p.car ? p.car.x : p.x;
     const pz = p.car ? p.car.z : p.z;
-    // Keep the cruiser count matched to the wanted level.
+    // Keep the cruiser count matched to the wanted level. Roadblock units
+    // hold their ground and do not count toward the pursuit's number.
     const wantCount = this.stars;
-    while (this.cruisers.length < wantCount) this.spawnCruiser();
-    while (this.cruisers.length > wantCount) {
-      const c = this.cruisers.pop();
+    const chaseCount = () => this.cruisers.reduce((n, c) => n + (c.blockade ? 0 : 1), 0);
+    while (chaseCount() < wantCount) this.spawnCruiser();
+    while (chaseCount() > wantCount) {
+      const idx = this.cruisers.map((c) => !c.blockade).lastIndexOf(true);
+      const c = this.cruisers.splice(idx, 1)[0];
       c.dispose();
     }
     this.setSiren(this.cruisers.length > 0);
@@ -106,6 +109,7 @@ export class Police {
     for (const cruiser of this.cruisers) {
       const d = dist2(cruiser.x, cruiser.z, px, pz);
       nearest = Math.min(nearest, d);
+      if (cruiser.blockade) continue; // roadblock units hold their ground
       const wantHeading = headingToward(cruiser.x, cruiser.z, px, pz);
       const diff = ((wantHeading - cruiser.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
       const input = { up: d > 6, down: false, left: diff > 0.18, right: diff < -0.18, hand: false };

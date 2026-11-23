@@ -20,7 +20,7 @@
   #hud-health-text { font-size: 12px; font-weight: 700; width: 26px; text-align: right; }
   #hud-stars { font-size: 20px; letter-spacing: 3px; margin-top: 4px; color: #8a929c; }
   #hud-top-right { position: absolute; top: 14px; right: 14px; text-align: right; }
-  #hud-minimap { width: 168px; height: 168px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
+  #hud-minimap { width: 200px; height: 200px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.25);
     background: #2c3138; box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
   #hud-wanted-label { font-size: 11px; letter-spacing: 2px; color: #c9c2b8; margin-top: 5px;
     text-shadow: 0 1px 4px rgba(0,0,0,0.85); }
@@ -65,7 +65,7 @@
   .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #b89a2e; }
   .btn.ghost { background: transparent; color: #ffd94d; border: 2px solid #ffd94d; box-shadow: none; }
   /* Polish panels: dispatch, mechanic readouts, judge note. */
-  #police-dispatch { position: absolute; top: 212px; right: 14px; width: 280px; padding: 10px 12px; }
+  #police-dispatch { position: absolute; top: 245px; right: 14px; width: 280px; padding: 10px 12px; }
   #police-dispatch-header { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; color: #8fd8ff; }
   .dispatch-row { display: flex; gap: 6px; font-size: 12px; font-weight: 600; margin-top: 6px;
     align-items: baseline; }
@@ -111,6 +111,38 @@
   #end-title { font-size: 64px; letter-spacing: 8px; color: #ff5a4d; text-shadow: 0 0 30px rgba(255, 60, 40, 0.7); }
   #pause-screen, #end-screen { display: none; }
   #btn-continue { display: none; }
+  /* v5 panels: respect strip, weapon wheel, crew panel. */
+  #respect-strip { position: absolute; top: 330px; left: 14px; width: 230px; padding: 10px 12px; }
+  #district-name { font-size: 15px; font-weight: 800; letter-spacing: 1px; color: #fff; }
+  #respect-row { display: flex; gap: 8px; align-items: baseline; margin-top: 6px; }
+  #respect-badge { background: #ffd94d; color: #1a1a1a; font-size: 12px; font-weight: 800; padding: 1px 7px; border-radius: 8px; }
+  #respect-name { font-size: 13px; font-weight: 800; color: #ffd94d; }
+  #respect-num { margin-left: auto; font-size: 11px; font-weight: 700; color: #b9c4d6; }
+  #respect-track { height: 6px; margin-top: 7px; background: rgba(255,255,255,.16); border-radius: 3px; overflow: hidden; }
+  #respect-fill { height: 100%; background: #ffd94d; }
+  #weapon-wheel { position: absolute; left: 58%; transform: translateX(-50%); bottom: 145px; width: auto; display: flex; gap: 10px; align-items: center; padding: 8px 12px; }
+  #weapon-slots { display: none !important; }
+  #wheel-header { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #8fd8ff; }
+  .wheel-slot { display: flex; gap: 8px; align-items: baseline; font-size: 13px; font-weight: 700; padding: 2px 4px; border-radius: 4px; }
+  .wheel-slot.selected { background: rgba(255,217,77,.18); }
+  .wheel-slot.locked { opacity: .45; }
+  .wheel-key { color: #8fd8ff; min-width: 12px; }
+  .wheel-name { color: #fff; }
+  .wheel-ammo { margin-left: auto; color: #ffe9a0; }
+  #crew-panel { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: auto; display: flex; gap: 12px; align-items: center; padding: 8px 12px; }
+  #crew-header { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; color: #8fd8ff; }
+  .crew-row { display: flex; gap: 7px; align-items: center; font-size: 12px; font-weight: 700; }
+  .crew-chip { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #1a1a1a; font-size: 12px; flex: none; }
+  .crew-name { color: #fff; }
+  .crew-ability { color: #b9c4d6; font-weight: 600; }
+  .crew-key { margin-left: auto; color: #8fd8ff; border: 1px solid rgba(143,216,255,.5); border-radius: 3px; padding: 0 5px; font-size: 11px; }
+  .crew-cd { color: #46c25a; min-width: 34px; text-align: right; }
+  .crew-track { width: 40px; height: 4px; display: inline-block; background: rgba(255,255,255,.14); border-radius: 2px; overflow: hidden; }
+  .crew-fill { display: block; height: 100%; }
+  .dispatch-status.roadblock { color: #ff9a3d; }
+  #start-screen { justify-content: flex-start; padding-left: 60px; }
+  #judge-block { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); width: 440px; }
+  #wheel-header, .wheel-slot, .wheel-name, .wheel-ammo, #crew-header, .crew-name, .crew-ability, .crew-cd { white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -123,7 +155,7 @@
     <div id="hud-stars">☆☆☆☆☆</div>
   </div>
   <div id="hud-top-right">
-    <canvas id="hud-minimap" width="168" height="168"></canvas>
+    <canvas id="hud-minimap" width="200" height="200"></canvas>
     <div id="hud-wanted-label">VELLORA BAY &nbsp;•&nbsp; MINIMAP</div>
   </div>
   <div id="hud-mission" class="panel">
@@ -151,7 +183,8 @@
     <p class="controls">
       <b>WASD</b> move / drive &nbsp;•&nbsp; <b>Shift</b> sprint &nbsp;•&nbsp; <b>Space</b> jump / handbrake<br>
       <b>E</b> steal or exit a car / grab &amp; deliver &nbsp;•&nbsp; <b>Click</b> shoot &nbsp;•&nbsp; <b>F</b> punch &nbsp;•&nbsp; <b>R</b> reload<br>
-      <b>Right-drag</b> look around &nbsp;•&nbsp; <b>Wheel</b> zoom &nbsp;•&nbsp; <b>Esc</b> pause &amp; save
+      <b>Right-drag</b> look around &nbsp;•&nbsp; <b>Wheel</b> zoom &nbsp;•&nbsp; <b>Esc</b> pause &amp; save<br>
+      <b>1–5</b> draw a weapon &nbsp;•&nbsp; <b>Z / X / C</b> crew abilities
     </p>
     <button id="btn-start" class="btn">START A NEW STORY</button>
     <button id="btn-continue" class="btn ghost">CONTINUE</button>

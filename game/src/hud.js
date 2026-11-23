@@ -100,8 +100,8 @@ export class Hud {
   drawMinimap() {
     const S = this.S;
     const ctx = this.mapCtx;
-    const W = 168;
-    const H = 168;
+    const W = 200;
+    const H = 200;
     const scale = W / 420; // world -210..210 maps onto the canvas
     const toX = (x) => W / 2 + x * scale;
     const toY = (z) => H / 2 + z * scale;

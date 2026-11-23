@@ -10,6 +10,15 @@ export class Combat {
     this.rng = makeRng(555);
     this.ammo = 12;
     this.magSize = 12;
+    // Five weapons, each with its own magazine; the wheel gates by rank.
+    this.weapons = {
+      fists: { name: 'FISTS', damage: 26, cooldown: 0.45, mag: Infinity, pellets: 1, rank: 1, ammo: Infinity },
+      pistol: { name: 'PISTOL', damage: 34, cooldown: 0.22, mag: 12, pellets: 1, rank: 1, ammo: 12 },
+      smg: { name: 'SMG', damage: 18, cooldown: 0.1, mag: 30, pellets: 1, rank: 2, ammo: 30 },
+      rifle: { name: 'RIFLE', damage: 55, cooldown: 0.5, mag: 24, pellets: 1, rank: 3, ammo: 24 },
+      shotgun: { name: 'SHOTGUN', damage: 16, cooldown: 0.8, mag: 6, pellets: 5, rank: 4, ammo: 6 },
+    };
+    this.weaponId = 'pistol';
     this.reloading = 0;
     this.shotCooldown = 0;
     this.punchCooldown = 0;
@@ -52,21 +61,47 @@ export class Combat {
     }
   }
 
+  // Draw a weapon: park the current magazine, load the new weapon's own.
+  setWeapon(id) {
+    const w = this.weapons[id];
+    if (!w || id === this.weaponId) return;
+    this.weapons[this.weaponId].ammo = this.ammo;
+    this.weaponId = id;
+    this.ammo = w.ammo;
+    this.magSize = w.mag;
+    this.reloading = 0;
+    const inf = w.mag === Infinity;
+    this.S.hud.setAmmo(inf ? '∞' : this.ammo, inf ? '∞' : this.magSize, false);
+    this.S.hud.toast(w.name + ' drawn.');
+  }
+
   shoot() {
     const S = this.S;
+    if (this.weaponId === 'fists') { this.punch(); return; }
     if (!this.canShoot || !S.player.onFoot) return;
     if (this.ammo <= 0) {
       S.audio.click();
       S.hud.toast('Click — empty. Press R to reload.');
       return;
     }
+    const w = this.weapons[this.weaponId];
     this.ammo--;
-    this.shotCooldown = 0.22;
+    this.weapons[this.weaponId].ammo = this.ammo;
+    this.shotCooldown = w.cooldown;
     S.audio.shot();
     S.traffic.scare(S.player.x, S.player.z, 26);
     S.police.addHeat(0.5, 'fired a shot');
-    // Raycast from the camera through the crosshair.
-    this.raycaster.setFromCamera({ x: 0, y: 0 }, S.camera);
+    for (let p = 0; p < w.pellets; p++) this.firePellet(w);
+    S.hud.setAmmo(this.ammo, this.magSize, this.reloading > 0);
+  }
+
+  // One raycast from the camera through the crosshair (jittered when the
+  // weapon fires a spread), damaging the first thug it hits, one tracer.
+  firePellet(w) {
+    const S = this.S;
+    const jx = w.pellets > 1 ? (this.rng() - 0.5) * 0.06 : 0;
+    const jy = w.pellets > 1 ? (this.rng() - 0.5) * 0.06 : 0;
+    this.raycaster.setFromCamera({ x: jx, y: jy }, S.camera);
     const targets = [];
     for (const thug of this.thugs) {
       if (thug.hp > 0) targets.push(thug.rig.group);
@@ -80,7 +115,7 @@ export class Combat {
       let obj = hit.object;
       while (obj && !obj.userData.thug && !obj.userData.car) obj = obj.parent;
       if (obj && obj.userData.thug) {
-        this.damageThug(obj.userData.thug, 34, S.player.x, S.player.z);
+        this.damageThug(obj.userData.thug, w.damage, S.player.x, S.player.z);
       } else if (obj && obj.userData.car) {
         S.hud.toast('You shot a car — the owner will remember that.');
         S.police.addHeat(0.5, 'shot a car');
@@ -160,6 +195,7 @@ export class Combat {
       this.reloading -= dt;
       if (this.reloading <= 0) {
         this.ammo = this.magSize;
+        this.weapons[this.weaponId].ammo = this.ammo;
         S.hud.setAmmo(this.ammo, this.magSize, false);
         S.audio.click();
       }
